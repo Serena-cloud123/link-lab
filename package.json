@@ -1,0 +1,24 @@
+{
+  "name": "link-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "packages/contracts",
+    "packages/engine"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace @link-lab/web",
+    "dev:api": "npm run dev --workspace @link-lab/api",
+    "build": "npm run build --workspace @link-lab/contracts && npm run build --workspace @link-lab/engine && npm run build --workspace @link-lab/api && npm run build --workspace @link-lab/web",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
