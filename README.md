@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Day 2：项目骨架已建立。前端可启动并显示模型边界，后端提供 `GET /health`。业务功能尚未实现。
+Day 3：静态场景与共享契约。场景 JSON 与 TypeScript 契约已定义，业务功能尚未实现。
 
 ## 学习目标
 
@@ -48,9 +48,10 @@ Invoke-RestMethod http://127.0.0.1:3001/health
 
 | 路径 | 职责 |
 | --- | --- |
+| `scenarios` | 场景静态定义（JSON） |
 | `apps/web` | React + TypeScript + Vite 前端 |
 | `apps/api` | Node.js + TypeScript + Fastify 后端 |
 | `packages/contracts` | 前后端共享契约类型 |
 | `packages/engine` | 确定性规则引擎（本阶段仅占位） |
 
-本阶段未实现：路径 A/B 判定、场景配置、32 组测试、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。
+本阶段未实现：路径 A/B 判定、32 组测试、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。

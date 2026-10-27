@@ -1,0 +1,56 @@
+{
+  "id": "campus-registration",
+  "version": 1,
+  "title": "校园活动报名数据泄露（虚构）",
+  "boundary": "本沙盘只建模一个虚构校园报名场景、两条预设路径、三种防御和两个初始条件。推演结果只说明本模型中的路径是否到达模拟数据，不代表任何真实系统的安全结论。本工具是入门引路，不替代动手实操。",
+
+  "nodes": [
+    { "id": "N1", "label": "普通账号",     "description": "起点：一个普通账号已经失守", "canvasX": 300, "canvasY": 40  },
+    { "id": "N2", "label": "报名应用",     "description": "面向学生的活动报名服务",       "canvasX": 300, "canvasY": 160 },
+    { "id": "N3", "label": "管理导出接口", "description": "批量导出报名明细的管理接口",   "canvasX": 120, "canvasY": 300 },
+    { "id": "N4", "label": "诊断页面",     "description": "运维排障页面，可能泄露内部令牌", "canvasX": 480, "canvasY": 300 },
+    { "id": "N5", "label": "服务令牌",     "description": "数据服务调用凭证",             "canvasX": 480, "canvasY": 420 },
+    { "id": "N6", "label": "数据服务",     "description": "存储报名明细的后端服务",       "canvasX": 480, "canvasY": 540 },
+    { "id": "N7", "label": "报名明细",     "description": "学生姓名、联系方式等敏感数据", "canvasX": 300, "canvasY": 660 }
+  ],
+
+  "paths": [
+    {
+      "id": "A",
+      "label": "路径 A：管理导出接口越权",
+      "steps": [
+        { "id": "A1", "from": "N1", "to": "N2" },
+        { "id": "A2", "from": "N2", "to": "N3", "sensitiveArrival": "N3" },
+        { "id": "A3", "from": "N3", "to": "N7", "barrier": "D1" }
+      ]
+    },
+    {
+      "id": "B",
+      "label": "路径 B：诊断页泄露服务令牌",
+      "steps": [
+        { "id": "B1", "from": "N1", "to": "N2" },
+        { "id": "B2", "from": "N2", "to": "N4", "condition": "O" },
+        { "id": "B3", "from": "N4", "to": "N5" },
+        { "id": "B4", "from": "N5", "to": "N6", "sensitiveArrival": "N6" },
+        { "id": "B5", "from": "N6", "to": "N7", "condition": "T", "barrier": "D2" }
+      ]
+    }
+  ],
+
+  "initialConditions": {
+    "O": { "label": "诊断页面对普通账号开放", "options": ["open", "closed"] },
+    "T": { "label": "服务令牌持有报名明细读取权限", "options": ["granted", "revoked"] }
+  },
+
+  "defenses": {
+    "D1": { "label": "修复管理导出接口权限检查", "blocksPath": "A" },
+    "D2": { "label": "收紧服务令牌权限",         "blocksPath": "B" },
+    "D3": { "label": "记录到达敏感接口的请求",    "alerts": true }
+  },
+
+  "presets": [
+    { "id": "A", "label": "预设 A：O 开 T 有", "conditions": { "O": "open",   "T": "granted" } },
+    { "id": "B", "label": "预设 B：O 关 T 有", "conditions": { "O": "closed", "T": "granted" } },
+    { "id": "C", "label": "预设 C：O 开 T 无", "conditions": { "O": "open",   "T": "revoked" } }
+  ]
+}
