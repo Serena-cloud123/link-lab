@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Day 3：静态场景与共享契约。场景 JSON 与 TypeScript 契约已定义，业务功能尚未实现。
+Day 4：路径 A 纯规则函数。场景与契约沿用 Day 3，路径 A 的 A1—A3 事件已可计算；路径 B、运行接口、数据库与前端交互尚未实现。
 
 ## 学习目标
 
@@ -54,4 +54,4 @@ Invoke-RestMethod http://127.0.0.1:3001/health
 | `packages/contracts` | 前后端共享契约类型 |
 | `packages/engine` | 确定性规则引擎（本阶段仅占位） |
 
-本阶段未实现：路径 A/B 判定、32 组测试、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。
+本阶段未实现：路径 B 判定、完整 RunResult、运行接口、32 组完整运行、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。

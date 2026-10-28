@@ -13,6 +13,13 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@link-lab/contracts": "*"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.5"
   }
 }
