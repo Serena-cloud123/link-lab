@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Day 5：路径 B 纯规则函数。场景与契约沿用 Day 3，路径 A 与路径 B 的事件均可计算；运行接口、数据库与前端交互尚未实现。
+Day 6：运行组合与 32 组完整验收。路径 A/B 与 `evaluateRun` 已实现，32 行期望 CSV 的 pathAReached、pathBReached、alertCount 三列全部通过。运行接口、数据库与前端交互尚未实现。
 
 ## 学习目标
 
@@ -52,6 +52,6 @@ Invoke-RestMethod http://127.0.0.1:3001/health
 | `apps/web` | React + TypeScript + Vite 前端 |
 | `apps/api` | Node.js + TypeScript + Fastify 后端 |
 | `packages/contracts` | 前后端共享契约类型 |
-| `packages/engine` | 确定性规则引擎（本阶段仅占位） |
+| `packages/engine` | 确定性规则引擎（路径 A/B 与运行组合已实现） |
 
-本阶段未实现：完整 RunResult、运行接口、32 组完整运行、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。
+本阶段未实现：运行接口、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。

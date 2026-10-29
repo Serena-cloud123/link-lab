@@ -11,7 +11,9 @@
 
 ## 本阶段范围
 
-仅保留包入口与构建配置。路径判定、场景配置、事件类型和测试均未实现。
+已实现路径 A（`evaluatePathA`）、路径 B（`evaluatePathB`）与运行组合（`evaluateRun`）。32 行期望 CSV 的 pathAReached、pathBReached、alertCount 三列均通过测试。
+
+一句话解释模板、数据库落库与运行接口尚未实现。
 
 ## 非职责
 
