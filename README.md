@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Day 6：运行组合与 32 组完整验收。路径 A/B 与 `evaluateRun` 已实现，32 行期望 CSV 的 pathAReached、pathBReached、alertCount 三列全部通过。运行接口、数据库与前端交互尚未实现。
+Day 7：最小推演接口。固定场景经 `GET /api/scenarios/campus-registration` 返回；`POST /api/evaluations` 在 HTTP 边界校验 `RunInput` 后调用 `evaluateRun`，直接返回 `RunResult`。不保存运行，不含 SQLite、前端交互、CORS、动画、AI 解释或历史回放。
 
 ## 学习目标
 
@@ -29,9 +29,20 @@ Day 6：运行组合与 32 组完整验收。路径 A/B 与 `evaluateRun` 已实
 
 ```powershell
 npm install
-npm run dev:web   # http://127.0.0.1:5173
-npm run dev:api   # http://127.0.0.1:3001
+npm run build       # 首次使用，或修改过 contracts / engine 之后必须先执行
+npm run dev:api     # http://127.0.0.1:3001
+npm run dev:web     # http://127.0.0.1:5173
+npm run typecheck
+npm run test
+```
+
+注意：`npm run dev:api` 会先构建 contracts 与 engine。**不要直接进入 `apps/api` 目录跑 `npm run dev`**，此时 engine 可能未构建，会因找不到 `@link-lab/engine` 的 dist 入口而失败。
+
+构建产物模式（运行 `dist` 里的入口）：
+
+```powershell
 npm run build
+npm start --workspace @link-lab/api
 ```
 
 后端健康检查：
@@ -42,6 +53,22 @@ Invoke-RestMethod http://127.0.0.1:3001/health
 
 预期：`{"status":"ok","service":"@link-lab/api"}`。
 
+读取固定场景：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3001/api/scenarios/campus-registration
+```
+
+运行一次推演（A-101：O 开、T 有、D1+D3）：
+
+```powershell
+Invoke-RestMethod -Method Post http://127.0.0.1:3001/api/evaluations -ContentType 'application/json' -Body '{"scenarioId":"campus-registration","conditions":{"O":"open","T":"granted"},"defenses":["D1","D3"]}'
+```
+
+预期：`pathResults` 为 A `blocked`、B `reached`，`alertCount` 为 2，`events` 共 8 条。
+
+非法输入（缺字段、非法值、重复防御、多余字段）返回 400，不进入引擎。
+
 可选环境变量：复制 `apps/api/.env.example` 为 `apps/api/.env`。`.env` 不进入版本库。
 
 ## 目录结构
@@ -50,8 +77,8 @@ Invoke-RestMethod http://127.0.0.1:3001/health
 | --- | --- |
 | `scenarios` | 场景静态定义（JSON） |
 | `apps/web` | React + TypeScript + Vite 前端 |
-| `apps/api` | Node.js + TypeScript + Fastify 后端 |
+| `apps/api` | Node.js + TypeScript + Fastify 后端（健康检查、固定场景、推演接口） |
 | `packages/contracts` | 前后端共享契约类型 |
-| `packages/engine` | 确定性规则引擎（路径 A/B 与运行组合已实现） |
+| `packages/engine` | 确定性规则引擎（路径 A/B、`evaluateRun` 与 32 组验收已实现） |
 
-本阶段未实现：运行接口、O/T 滑块、React Flow 画布、动画、数据库业务表和模型 API。构建产物写入各自 `dist/`，不进入版本库。
+本阶段未实现：运行的保存与历史回放、SQLite 业务表、O/T 滑块与前端交互、React Flow 画布、CORS、动画和 AI 解释。构建产物写入各自 `dist/`，不进入版本库。
