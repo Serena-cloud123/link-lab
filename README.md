@@ -4,7 +4,7 @@
 
 ## 当前阶段
 
-Day 7：最小推演接口。固定场景经 `GET /api/scenarios/campus-registration` 返回；`POST /api/evaluations` 在 HTTP 边界校验 `RunInput` 后调用 `evaluateRun`，直接返回 `RunResult`。不保存运行，不含 SQLite、前端交互、CORS、动画、AI 解释或历史回放。
+Day 8：第一版静态沙盘工作台。前端含场景介绍、沙盘工作台、学习记录三页骨架；从 `GET /api/scenarios/campus-registration` 加载唯一场景，用 `@xyflow/react` 画只读七节点图（N1→N2 为 A1/B1 共享连线），选择 A/B/C 预设后手动运行无防御基线并展示 A/B 结果、告警与八条事件。O/T 自由滑块、防御选择、逐帧播放、动画、AI 解释、SQLite 与保存回放仍未实现。
 
 ## 学习目标
 
@@ -37,6 +37,8 @@ npm run test
 ```
 
 注意：`npm run dev:api` 会先构建 contracts 与 engine。**不要直接进入 `apps/api` 目录跑 `npm run dev`**，此时 engine 可能未构建，会因找不到 `@link-lab/engine` 的 dist 入口而失败。
+
+前端通过 Vite 开发代理把 `/api` 转发到 `http://127.0.0.1:3001`，使用工作台时需同时运行 `dev:api` 与 `dev:web`。
 
 构建产物模式（运行 `dist` 里的入口）：
 
@@ -76,9 +78,9 @@ Invoke-RestMethod -Method Post http://127.0.0.1:3001/api/evaluations -ContentTyp
 | 路径 | 职责 |
 | --- | --- |
 | `scenarios` | 场景静态定义（JSON） |
-| `apps/web` | React + TypeScript + Vite 前端 |
+| `apps/web` | React + TypeScript + Vite 前端（场景介绍 / 沙盘工作台 / 学习记录三页骨架，静态图与基线运行） |
 | `apps/api` | Node.js + TypeScript + Fastify 后端（健康检查、固定场景、推演接口） |
 | `packages/contracts` | 前后端共享契约类型 |
 | `packages/engine` | 确定性规则引擎（路径 A/B、`evaluateRun` 与 32 组验收已实现） |
 
-本阶段未实现：运行的保存与历史回放、SQLite 业务表、O/T 滑块与前端交互、React Flow 画布、CORS、动画和 AI 解释。构建产物写入各自 `dist/`，不进入版本库。
+本阶段未实现：O/T 自由滑块、D1/D2/D3 防御选择、逐帧播放与流线动画、运行的保存与历史回放、SQLite 业务表、CORS 和 AI 解释。构建产物写入各自 `dist/`，不进入版本库。

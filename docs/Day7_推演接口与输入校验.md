@@ -20,34 +20,6 @@
 
 ## 人工验收案例
 
-| 输入 | A | B | 总告警 |
-| --- | --- | --- | --- |
-| A-101：O 开、T 有、D1+D3 | blocked | reached | 2 |
-| B-001：O 关、T 有、仅 D3 | reached | blocked | 1 |
-
-## AI 协作与验证记录
-# Day 7：推演接口与输入校验
-
-## 今日目标
-
-固定场景经后端读取；合法 RunInput 调用 evaluateRun，返回 RunResult。本日不保存运行。
-
-## 接口
-
-- GET /health：维持原有行为。
-- GET /api/scenarios/campus-registration：返回版本 1 的固定场景。
-- POST /api/evaluations：接收 RunInput，返回 RunResult；不保存运行。
-
-## 输入边界
-
-- scenarioId 只能是 campus-registration。
-- conditions 必须同时含 O、T；O 只能 open/closed，T 只能 granted/revoked。
-- defenses 是 D1/D2/D3 的数组，不接受重复项。
-- presetId 可不填；填入时只能是 A/B/C，不得覆盖 conditions。
-- 缺字段、非法值和多余字段返回 400，不进入引擎。
-
-## 人工验收案例
-
 | 输入 | A 预期 | B 预期 | 告警预期 | 实测（开发模式 / 构建后模式） |
 | --- | --- | --- | --- | --- |
 | A-101：O 开、T 有、D1+D3 | blocked | reached | 2 | 两种模式一致：A blocked（A3，D1）、B reached、alertCount 2、events 8 |
