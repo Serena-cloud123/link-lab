@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
+  DefenseId,
+  OValue,
   PresetId,
   RunInput,
   RunResult,
-  Scenario
+  Scenario,
+  TValue
 } from "@link-lab/contracts";
 import { fetchScenario, postEvaluation } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
@@ -11,6 +14,7 @@ import { RunResultPanel } from "./components/RunResultPanel";
 import { oValueText, tValueText } from "./labels";
 
 type PageId = "intro" | "workbench" | "records";
+type Conditions = { O: OValue; T: TValue };
 
 const pages: Array<{ id: PageId; label: string }> = [
   { id: "intro", label: "场景介绍" },
@@ -33,19 +37,60 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * 固定 key 顺序的配置序列化，避免同一配置因对象 key 顺序不同被当成两个配置。
+ * 防御数组按字典序排序后拼接，保证 ["D1","D2"] 与 ["D2","D1"] 等价。
+ */
+function serializeConfig(conditions: Conditions, defenses: DefenseId[]): string {
+  return `O=${conditions.O};T=${conditions.T};D=[${[...defenses].sort().join(",")}]`;
+}
+
+const DEFENSE_ORDER: DefenseId[] = ["D1", "D2", "D3"];
+
 export default function App() {
   const [page, setPage] = useState<PageId>("intro");
   const [scenarioState, setScenarioState] = useState<ScenarioState>({
     status: "loading"
   });
   const [presetId, setPresetId] = useState<PresetId>("A");
+  const [conditions, setConditions] = useState<Conditions>({
+    O: "open",
+    T: "granted"
+  });
+  const [preview, setPreview] = useState<Conditions>({
+    O: "open",
+    T: "granted"
+  });
+  const [defenses, setDefenses] = useState<DefenseId[]>([]);
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
+
+  // 同步真值（refs），state 仅作为渲染镜像
+  const scenarioRef = useRef<Scenario | null>(null);
+  const presetIdRef = useRef<PresetId>("A");
+  const conditionsRef = useRef<Conditions>({ O: "open", T: "granted" });
+  const previewRef = useRef<Conditions>({ O: "open", T: "granted" });
+  const defensesRef = useRef<DefenseId[]>([]);
+  const submittedConfigRef = useRef<string>("");
+  const runVersionRef = useRef(0);
+  const runningRef = useRef(false);
   const mountedRef = useRef(true);
 
   const loadScenario = useCallback(async () => {
     setScenarioState({ status: "loading" });
     try {
       const scenario = await fetchScenario();
+      scenarioRef.current = scenario;
+      // 用预设 A 初始化条件（与场景保持一致）
+      const presetA = scenario.presets.find((p) => p.id === "A");
+      if (presetA) {
+        const init: Conditions = { ...presetA.conditions };
+        presetIdRef.current = "A";
+        conditionsRef.current = { ...init };
+        previewRef.current = { ...init };
+        setPresetId("A");
+        setConditions({ ...init });
+        setPreview({ ...init });
+      }
       if (mountedRef.current) {
         setScenarioState({ status: "ready", scenario });
       }
@@ -68,28 +113,121 @@ export default function App() {
     scenarioState.status === "ready" ? scenarioState.scenario : null;
   const running = runState.status === "running";
 
-  async function handleRun() {
-    if (!scenario || running) return;
-    const preset = scenario.presets.find((item) => item.id === presetId);
-    if (!preset) return;
+  /**
+   * 唯一的 POST 入口。始终用参数 nextConditions / nextDefenses 显式构造 input，
+   * 不依赖可能滞后的 state。
+   */
+  async function run(nextConditions: Conditions, nextDefenses: DefenseId[]) {
+    if (runningRef.current) return;
+    const scenario = scenarioRef.current;
+    if (!scenario) return;
+
+    const version = ++runVersionRef.current;
+    const nextSerialized = serializeConfig(nextConditions, nextDefenses);
+
+    // 同步更新 ref 真值与 submittedConfig（第二道门）
+    submittedConfigRef.current = nextSerialized;
+    conditionsRef.current = { ...nextConditions };
+    defensesRef.current = [...nextDefenses];
+    runningRef.current = true;
+
+    // 同步渲染镜像
+    setConditions({ ...nextConditions });
+    setDefenses([...nextDefenses]);
+    setRunState({ status: "running" });
+
+    // 显式构造 input，key 顺序固定
     const input: RunInput = {
       scenarioId: scenario.id,
-      presetId,
-      conditions: preset.conditions,
-      defenses: []
+      presetId: presetIdRef.current,
+      conditions: { O: nextConditions.O, T: nextConditions.T },
+      defenses: [...nextDefenses]
     };
-    setRunState({ status: "running" });
+
     try {
       const result = await postEvaluation(input);
+      if (version !== runVersionRef.current || !mountedRef.current) return;
       setRunState({ status: "done", result, input });
     } catch (error) {
+      if (version !== runVersionRef.current || !mountedRef.current) return;
       setRunState({ status: "error", message: errorMessage(error) });
+    } finally {
+      if (version === runVersionRef.current) {
+        runningRef.current = false;
+      }
     }
   }
 
+  /**
+   * 滑块释放时提交。两道门：
+   * 1. preview === conditions（拖回原位）→ 0 POST；
+   * 2. 序列化后与 submittedConfigRef 相同（mouseup + blur 重复）→ 0 POST。
+   * 第二道门在第一道门之后，实际不会拦截合法重跑（手动运行走 run() 直达）。
+   */
+  function commitConditions() {
+    const p = previewRef.current;
+    const c = conditionsRef.current;
+    if (p.O === c.O && p.T === c.T) return;
+    const key = serializeConfig(p, defensesRef.current);
+    if (key === submittedConfigRef.current) return;
+    void run(p, defensesRef.current);
+  }
+
+  // 拖动过程仅更新预览，不发 POST
+  function handleSliderInput(cond: "O" | "T", rawValue: number) {
+    const value: OValue | TValue =
+      cond === "O"
+        ? rawValue === 0
+          ? "open"
+          : "closed"
+        : rawValue === 0
+          ? "granted"
+          : "revoked";
+    const next: Conditions = { ...previewRef.current, [cond]: value };
+    previewRef.current = next; // 同步写 ref，不等 useEffect
+    setPreview(next);
+  }
+
+  function toggleDefense(id: DefenseId) {
+    if (runningRef.current) return;
+    const current = defensesRef.current;
+    const next = current.includes(id)
+      ? current.filter((d) => d !== id)
+      : [...current, id];
+    defensesRef.current = next; // 同步写 ref
+    setDefenses(next);
+    void run(conditionsRef.current, next);
+  }
+
+  function handleManualRun() {
+    // 手动运行绕过 no-op 检查，允许重跑同一配置
+    void run(conditionsRef.current, defensesRef.current);
+  }
+
   function handleSelectPreset(id: PresetId) {
-    if (running) return;
+    if (runningRef.current) return;
+    const scenario = scenarioRef.current;
+    if (!scenario) return;
+    const preset = scenario.presets.find((p) => p.id === id);
+    if (!preset) return;
+
+    // 使在途响应失效
+    runVersionRef.current++;
+    runningRef.current = false;
+
+    // 同步重置所有 ref
+    const init: Conditions = { ...preset.conditions };
+    presetIdRef.current = id;
+    conditionsRef.current = { ...init };
+    previewRef.current = { ...init };
+    defensesRef.current = [];
+    submittedConfigRef.current = "";
+
+    // 同步渲染镜像
     setPresetId(id);
+    setConditions({ ...init });
+    setPreview({ ...init });
+    setDefenses([]);
     setRunState({ status: "idle" });
   }
 
@@ -143,6 +281,12 @@ export default function App() {
     const ready = scenarioState.scenario;
     const preset =
       ready.presets.find((item) => item.id === presetId) ?? null;
+    const adjusted = preset
+      ? conditions.O !== preset.conditions.O ||
+        conditions.T !== preset.conditions.T ||
+        defenses.length > 0
+      : false;
+
     content = (
       <section className="workbench-grid" aria-label="沙盘工作台">
         <aside className="panel config-panel" aria-label="运行配置">
@@ -160,32 +304,96 @@ export default function App() {
               </button>
             ))}
           </div>
-          {preset ? (
-            <dl className="condition-view">
-              <div>
-                <dt>{ready.initialConditions.O.label}</dt>
-                <dd>{oValueText[preset.conditions.O]}</dd>
-              </div>
-              <div>
-                <dt>{ready.initialConditions.T.label}</dt>
-                <dd>{tValueText[preset.conditions.T]}</dd>
-              </div>
-              <div>
-                <dt>防御</dt>
-                <dd>无（基线运行）</dd>
-              </div>
-            </dl>
+
+          {preset && adjusted ? (
+            <p className="adjust-hint">
+              从预设 {preset.id} 调整（O {oValueText[conditions.O]} · T{" "}
+              {tValueText[conditions.T]}
+              {defenses.length > 0 ? ` · 防御 ${defenses.join("、")}` : ""}）
+            </p>
           ) : null}
+
+          <div className="condition-sliders">
+            <div className="slider-row">
+              <label htmlFor="o-slider">{ready.initialConditions.O.label}</label>
+              <input
+                id="o-slider"
+                type="range"
+                min={0}
+                max={1}
+                step={1}
+                value={preview.O === "open" ? 0 : 1}
+                disabled={running}
+                aria-valuetext={oValueText[preview.O]}
+                onInput={(e) =>
+                  handleSliderInput("O", Number((e.target as HTMLInputElement).value))
+                }
+                onMouseUp={commitConditions}
+                onKeyUp={commitConditions}
+                onTouchEnd={commitConditions}
+                onBlur={commitConditions}
+              />
+              <span className="slider-value">{oValueText[preview.O]}</span>
+            </div>
+            <div className="slider-row">
+              <label htmlFor="t-slider">{ready.initialConditions.T.label}</label>
+              <input
+                id="t-slider"
+                type="range"
+                min={0}
+                max={1}
+                step={1}
+                value={preview.T === "granted" ? 0 : 1}
+                disabled={running}
+                aria-valuetext={tValueText[preview.T]}
+                onInput={(e) =>
+                  handleSliderInput("T", Number((e.target as HTMLInputElement).value))
+                }
+                onMouseUp={commitConditions}
+                onKeyUp={commitConditions}
+                onTouchEnd={commitConditions}
+                onBlur={commitConditions}
+              />
+              <span className="slider-value">{tValueText[preview.T]}</span>
+            </div>
+          </div>
+
+          <div className="defense-group" role="group" aria-label="防御措施">
+            {DEFENSE_ORDER.map((id) => {
+              const def = ready.defenses[id];
+              const active = defenses.includes(id);
+              const isD3 = id === "D3";
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  className={`defense-toggle ${active ? "active" : ""} ${
+                    isD3 ? "d3" : ""
+                  }`}
+                  disabled={running}
+                  aria-pressed={active}
+                  onClick={() => toggleDefense(id)}
+                >
+                  <span className="defense-id">{id}</span>
+                  <span className="defense-label">{def.label}</span>
+                  <span className="defense-type">
+                    {isD3 ? "记录告警" : "阻断"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
           <button
             type="button"
             className="run-button"
             disabled={running || !preset}
-            onClick={() => void handleRun()}
+            onClick={handleManualRun}
           >
-            {running ? "正在运行…" : "运行无防御基线"}
+            {running ? "正在运行…" : "运行当前配置"}
           </button>
           <p className="hint">
-            O/T 滑块与 D1/D2/D3 选择后续开放，当前只能运行无防御基线。
+            拖动 O/T 滑块或点击防御开关即自动提交；也可点击上方按钮重跑当前配置。
           </p>
         </aside>
 
@@ -200,9 +408,7 @@ export default function App() {
         <aside className="panel result-panel" aria-label="运行结果">
           <h2>运行结果</h2>
           {runState.status === "idle" ? (
-            <p className="notice">
-              尚未运行。选择预设后点击“运行无防御基线”。
-            </p>
+            <p className="notice">尚未运行。调整 O/T 或防御后自动提交，或点击“运行当前配置”。</p>
           ) : null}
           {runState.status === "running" ? (
             <p className="notice">正在运行…</p>
@@ -210,7 +416,7 @@ export default function App() {
           {runState.status === "error" ? (
             <div className="notice error" role="alert">
               <p>运行失败：{runState.message}</p>
-              <button type="button" onClick={() => void handleRun()}>
+              <button type="button" onClick={handleManualRun}>
                 重试
               </button>
             </div>
@@ -230,7 +436,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <p className="stage">Day 8 · 静态工作台与基线运行</p>
+        <p className="stage">Day 9 · 双条件滑块与防御配置</p>
         <nav className="topnav" aria-label="页面">
           {pages.map((item) => (
             <button
