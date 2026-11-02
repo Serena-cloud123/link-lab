@@ -444,6 +444,145 @@ h3 {
   color: #8595a5;
 }
 
+.baseline-prompt {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px dashed #3d6f8f;
+  border-radius: 8px;
+  background: #0f1c26;
+}
+
+.baseline-prompt p {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #a9c4d6;
+}
+
+.baseline-prompt p:last-child {
+  margin-bottom: 0;
+}
+
+.baseline-button {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #3d6f8f;
+  border-radius: 6px;
+  background: #142a38;
+  color: #cfe3ee;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.baseline-button:hover:not(:disabled) {
+  background: #1b3647;
+}
+
+.baseline-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.baseline-error {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: #e6b8bb;
+}
+
+.baseline-self {
+  margin-top: 14px;
+  border-style: dashed;
+}
+
+.comparison-panel {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid #2c3b49;
+}
+
+.comparison-title {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #e7edf3;
+}
+
+.comparison-meta {
+  margin: 0 0 12px;
+  font-size: 0.82rem;
+  color: #8595a5;
+}
+
+.comparison-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.comparison-item {
+  padding: 8px 12px;
+  border: 1px solid #2c3b49;
+  border-radius: 8px;
+  background: #101a24;
+}
+
+.comparison-path {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #7fc8b5;
+}
+
+.comparison-line {
+  margin: 0 0 4px;
+  font-size: 0.82rem;
+  color: #c7d2dc;
+}
+
+.diff-tag {
+  display: inline-block;
+  margin-top: 2px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  background: #1a2a35;
+  color: #8595a5;
+}
+
+.diff-became-blocked {
+  background: #2a1a1c;
+  color: #e6a3a7;
+}
+
+.diff-stayed-reached {
+  background: #2a2210;
+  color: #e0c184;
+}
+
+.diff-already-blocked {
+  background: #1a2a35;
+  color: #a9c4d6;
+}
+
+.diff-became-reached {
+  background: #1f2a1a;
+  color: #a9d6a3;
+}
+
+.comparison-alerts {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #c7d2dc;
+}
+
+.comparison-note {
+  margin: 0 0 8px;
+  font-size: 0.82rem;
+  color: #e0c184;
+}
+
 @media (max-width: 1023px) {
   .shell {
     padding-top: 24px;

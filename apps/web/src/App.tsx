@@ -11,6 +11,10 @@ import type {
 import { fetchScenario, postEvaluation } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
+import {
+  BaselineComparisonPanel,
+  type BaselineSnapshot
+} from "./components/BaselineComparisonPanel";
 import { oValueText, tValueText } from "./labels";
 
 type PageId = "intro" | "workbench" | "records";
@@ -32,6 +36,12 @@ type RunState =
   | { status: "running" }
   | { status: "error"; message: string }
   | { status: "done"; result: RunResult; input: RunInput };
+
+type BaselineState =
+  | { status: "idle" }
+  | { status: "running" }
+  | { status: "error"; message: string }
+  | { status: "done"; snapshot: BaselineSnapshot };
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -63,6 +73,9 @@ export default function App() {
   });
   const [defenses, setDefenses] = useState<DefenseId[]>([]);
   const [runState, setRunState] = useState<RunState>({ status: "idle" });
+  const [baselineState, setBaselineState] = useState<BaselineState>({
+    status: "idle"
+  });
 
   // 同步真值（refs），state 仅作为渲染镜像
   const scenarioRef = useRef<Scenario | null>(null);
@@ -74,9 +87,16 @@ export default function App() {
   const runVersionRef = useRef(0);
   const runningRef = useRef(false);
   const mountedRef = useRef(true);
+  // 基线独立轨道：版本号 + 在途标记，与当前运行互不相干
+  const baselineVersionRef = useRef(0);
+  const baselineInFlightRef = useRef(false);
 
   const loadScenario = useCallback(async () => {
     setScenarioState({ status: "loading" });
+    // 场景重载时旧基线一律失效
+    baselineVersionRef.current++;
+    baselineInFlightRef.current = false;
+    setBaselineState({ status: "idle" });
     try {
       const scenario = await fetchScenario();
       scenarioRef.current = scenario;
@@ -113,14 +133,27 @@ export default function App() {
     scenarioState.status === "ready" ? scenarioState.scenario : null;
   const running = runState.status === "running";
 
+  /** 使基线立即失效：在途响应由版本号闸门丢弃，不会被恢复。 */
+  function invalidateBaseline() {
+    baselineVersionRef.current++;
+    baselineInFlightRef.current = false;
+    setBaselineState({ status: "idle" });
+  }
+
   /**
-   * 唯一的 POST 入口。始终用参数 nextConditions / nextDefenses 显式构造 input，
-   * 不依赖可能滞后的 state。
+   * 唯一的当前运行 POST 入口。始终用参数 nextConditions / nextDefenses 显式构造
+   * input，不依赖可能滞后的 state。O/T 变化时同步使旧基线失效。
    */
   async function run(nextConditions: Conditions, nextDefenses: DefenseId[]) {
     if (runningRef.current) return;
     const scenario = scenarioRef.current;
     if (!scenario) return;
+
+    // 先与提交前的 O/T 比对：只有初始条件变化才使基线失效，切防御不失效
+    const prev = conditionsRef.current;
+    const conditionsChanged =
+      prev.O !== nextConditions.O || prev.T !== nextConditions.T;
+    if (conditionsChanged) invalidateBaseline();
 
     const version = ++runVersionRef.current;
     const nextSerialized = serializeConfig(nextConditions, nextDefenses);
@@ -148,12 +181,76 @@ export default function App() {
       const result = await postEvaluation(input);
       if (version !== runVersionRef.current || !mountedRef.current) return;
       setRunState({ status: "done", result, input });
+      // 本次就是无防御运行：把这份真实 input+result 直接作为同条件基线
+      if (nextDefenses.length === 0) {
+        baselineVersionRef.current++;
+        baselineInFlightRef.current = false;
+        setBaselineState({
+          status: "done",
+          snapshot: {
+            scenarioId: scenario.id,
+            scenarioVersion: scenario.version,
+            conditions: { O: nextConditions.O, T: nextConditions.T },
+            input,
+            result
+          }
+        });
+      }
     } catch (error) {
       if (version !== runVersionRef.current || !mountedRef.current) return;
       setRunState({ status: "error", message: errorMessage(error) });
     } finally {
       if (version === runVersionRef.current) {
         runningRef.current = false;
+      }
+    }
+  }
+
+  /**
+   * 补跑当前 O/T 的无防御基线。独立轨道：只写 baselineState，
+   * 不改防御开关、不覆盖当前干预结果，一次点击只发一次请求。
+   */
+  async function runBaseline() {
+    if (baselineInFlightRef.current || runningRef.current) return;
+    const scenario = scenarioRef.current;
+    if (!scenario) return;
+
+    const version = ++baselineVersionRef.current;
+    baselineInFlightRef.current = true;
+    const conds = { ...conditionsRef.current };
+    setBaselineState({ status: "running" });
+
+    const input: RunInput = {
+      scenarioId: scenario.id,
+      presetId: presetIdRef.current,
+      conditions: { O: conds.O, T: conds.T },
+      defenses: []
+    };
+
+    try {
+      const result = await postEvaluation(input);
+      // 版本号 + 当前 O/T 双重校验：过期响应绝不恢复旧基线
+      if (version !== baselineVersionRef.current || !mountedRef.current) return;
+      const now = conditionsRef.current;
+      if (now.O !== conds.O || now.T !== conds.T) return;
+      setBaselineState({
+        status: "done",
+        snapshot: {
+          scenarioId: scenario.id,
+          scenarioVersion: scenario.version,
+          conditions: { O: conds.O, T: conds.T },
+          input,
+          result
+        }
+      });
+    } catch (error) {
+      if (version !== baselineVersionRef.current || !mountedRef.current) return;
+      const now = conditionsRef.current;
+      if (now.O !== conds.O || now.T !== conds.T) return;
+      setBaselineState({ status: "error", message: errorMessage(error) });
+    } finally {
+      if (version === baselineVersionRef.current) {
+        baselineInFlightRef.current = false;
       }
     }
   }
@@ -214,6 +311,8 @@ export default function App() {
     // 使在途响应失效
     runVersionRef.current++;
     runningRef.current = false;
+    // 切预设是另一条基线失效路径
+    invalidateBaseline();
 
     // 同步重置所有 ref
     const init: Conditions = { ...preset.conditions };
@@ -286,6 +385,18 @@ export default function App() {
         conditions.T !== preset.conditions.T ||
         defenses.length > 0
       : false;
+
+    const baselineSnapshot =
+      baselineState.status === "done" ? baselineState.snapshot : null;
+    // 资格只取场景 ID、场景版本、O、T；presetId 不参与
+    const baselineMatches =
+      baselineSnapshot !== null &&
+      baselineSnapshot.scenarioId === ready.id &&
+      baselineSnapshot.scenarioVersion === ready.version &&
+      baselineSnapshot.conditions.O === conditions.O &&
+      baselineSnapshot.conditions.T === conditions.T;
+    const baselineRunning = baselineState.status === "running";
+    const hasDefenses = defenses.length > 0;
 
     content = (
       <section className="workbench-grid" aria-label="沙盘工作台">
@@ -384,6 +495,31 @@ export default function App() {
             })}
           </div>
 
+          {hasDefenses ? (
+            baselineRunning ? (
+              <p className="baseline-prompt">正在运行当前条件的无防御基线…</p>
+            ) : baselineMatches ? null : (
+              <div className="baseline-prompt">
+                <p>
+                  当前 O/T 尚无无防御基线，无法对比。补跑一次不会改变防御开关，也不会覆盖当前结果。
+                </p>
+                <button
+                  type="button"
+                  className="baseline-button"
+                  disabled={running}
+                  onClick={() => void runBaseline()}
+                >
+                  运行当前条件的无防御基线
+                </button>
+                {baselineState.status === "error" ? (
+                  <p className="baseline-error" role="alert">
+                    基线运行失败：{baselineState.message}
+                  </p>
+                ) : null}
+              </div>
+            )
+          ) : null}
+
           <button
             type="button"
             className="run-button"
@@ -422,11 +558,30 @@ export default function App() {
             </div>
           ) : null}
           {runState.status === "done" ? (
-            <RunResultPanel
-              scenario={ready}
-              result={runState.result}
-              input={runState.input}
-            />
+            <>
+              <RunResultPanel
+                scenario={ready}
+                result={runState.result}
+                input={runState.input}
+              />
+              {baselineSnapshot &&
+              baselineMatches &&
+              runState.input.conditions.O === conditions.O &&
+              runState.input.conditions.T === conditions.T ? (
+                runState.input.defenses.length === 0 ? (
+                  <p className="baseline-self notice">
+                    当前运行即为无防御基线，选择防御后自动出现对比。
+                  </p>
+                ) : (
+                  <BaselineComparisonPanel
+                    scenario={ready}
+                    baseline={baselineSnapshot}
+                    currentInput={runState.input}
+                    currentResult={runState.result}
+                  />
+                )
+              ) : null}
+            </>
           ) : null}
         </aside>
       </section>
@@ -436,7 +591,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <p className="stage">Day 9 · 双条件滑块与防御配置</p>
+        <p className="stage">Day 10 · 同条件基线与干预对比</p>
         <nav className="topnav" aria-label="页面">
           {pages.map((item) => (
             <button

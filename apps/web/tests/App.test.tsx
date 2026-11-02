@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Scenario } from "@link-lab/contracts";
+import type { RunInput, RunResult, Scenario } from "@link-lab/contracts";
 import App from "../src/App";
 
 vi.mock("../src/api", () => ({
@@ -9,6 +9,10 @@ vi.mock("../src/api", () => ({
 }));
 
 import { fetchScenario, postEvaluation } from "../src/api";
+
+type MockFn = ReturnType<typeof vi.fn>;
+const fetchScenarioMock = fetchScenario as unknown as MockFn;
+const postEvaluationMock = postEvaluation as unknown as MockFn;
 
 const scenarioFixture: Scenario = {
   id: "campus-registration",
@@ -62,19 +66,44 @@ const scenarioFixture: Scenario = {
   ]
 };
 
-const okResult = {
-  events: [],
-  pathResults: [],
-  alertCount: 0
+const okResult: RunResult = { events: [], pathResults: [], alertCount: 0 };
+
+const baselineInputFixture: RunInput = {
+  scenarioId: "campus-registration",
+  presetId: "A",
+  conditions: { O: "open", T: "granted" },
+  defenses: []
 };
 
+/** 测试用返回值：仅用于驱动对比展示，不代表引擎规则。 */
+function makeResult(input: RunInput): RunResult {
+  const hasD1 = input.defenses.includes("D1");
+  const hasD3 = input.defenses.includes("D3");
+  const pathA = hasD1
+    ? {
+        pathId: "A" as const,
+        outcome: "blocked" as const,
+        firstBlockedStepId: "A3" as const,
+        blockedReason: "D1 已开启，管理导出接口拒绝请求"
+      }
+    : { pathId: "A" as const, outcome: "reached" as const };
+  const pathB =
+    input.conditions.O === "closed"
+      ? {
+          pathId: "B" as const,
+          outcome: "blocked" as const,
+          firstBlockedStepId: "B2" as const,
+          blockedReason: "诊断页面对普通账号关闭，访问被拒绝"
+        }
+      : { pathId: "B" as const, outcome: "reached" as const };
+  return {
+    events: [],
+    pathResults: [pathA, pathB],
+    alertCount: hasD3 ? 2 : 0
+  };
+}
+
 async function renderWorkbench() {
-  (fetchScenario as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    scenarioFixture
-  );
-  (postEvaluation as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    okResult
-  );
   render(<App />);
   await screen.findByText("进入沙盘工作台");
   fireEvent.click(screen.getByText("进入沙盘工作台"));
@@ -89,9 +118,14 @@ function getDefenseButton(id: "D1" | "D2" | "D3"): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(id) });
 }
 
-describe("App 工作bench 交互", () => {
+const COMPARISON_TITLE = "同条件对比：无防御基线 → 当前防御运行";
+
+describe("App 工作台交互", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    // 新增用例会按 input 定制返回值，必须彻底复位，避免污染既有用例
+    vi.resetAllMocks();
+    fetchScenarioMock.mockResolvedValue(scenarioFixture);
+    postEvaluationMock.mockResolvedValue(okResult);
   });
 
   it("拖动滑块（input）不提交", async () => {
@@ -100,7 +134,7 @@ describe("App 工作bench 交互", () => {
 
     fireEvent.input(oSlider, { target: { value: "1" } });
 
-    expect(postEvaluation).not.toHaveBeenCalled();
+    expect(postEvaluationMock).not.toHaveBeenCalled();
   });
 
   it("拖动后 mouseUp 提交一次，O=closed", async () => {
@@ -110,10 +144,8 @@ describe("App 工作bench 交互", () => {
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
 
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
-    const input = (
-      postEvaluation as unknown as ReturnType<typeof vi.fn>
-    ).mock.calls[0][0];
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
+    const input = postEvaluationMock.mock.calls[0][0] as RunInput;
     expect(input.conditions.O).toBe("closed");
   });
 
@@ -125,7 +157,7 @@ describe("App 工作bench 交互", () => {
     fireEvent.input(oSlider, { target: { value: "0" } });
     fireEvent.mouseUp(oSlider);
 
-    expect(postEvaluation).not.toHaveBeenCalled();
+    expect(postEvaluationMock).not.toHaveBeenCalled();
   });
 
   it("mouseUp 后再 blur 只提交一次（去重）", async () => {
@@ -136,7 +168,7 @@ describe("App 工作bench 交互", () => {
     fireEvent.mouseUp(oSlider);
     fireEvent.blur(oSlider);
 
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
   });
 
   it("点击 D1 提交一次，defenses=['D1']", async () => {
@@ -145,10 +177,8 @@ describe("App 工作bench 交互", () => {
 
     fireEvent.click(d1);
 
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
-    const input = (
-      postEvaluation as unknown as ReturnType<typeof vi.fn>
-    ).mock.calls[0][0];
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
+    const input = postEvaluationMock.mock.calls[0][0] as RunInput;
     expect(input.defenses).toEqual(["D1"]);
   });
 
@@ -162,9 +192,7 @@ describe("App 工作bench 交互", () => {
   it("运行中（永不 resolve）点击 D2 与拖动滑块均不产生新提交", async () => {
     await renderWorkbench();
     // 让 postEvaluation 永不 resolve，使组件停在 running 状态
-    (
-      postEvaluation as unknown as ReturnType<typeof vi.fn>
-    ).mockReturnValue(new Promise(() => {}));
+    postEvaluationMock.mockReturnValue(new Promise(() => {}));
 
     // 触发一次运行进入 running
     fireEvent.click(getDefenseButton("D1"));
@@ -173,7 +201,7 @@ describe("App 工作bench 交互", () => {
         screen.getByRole("button", { name: "正在运行…" })
       ).toBeInTheDocument()
     );
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
 
     // running 状态下点击 D2：不提交
     fireEvent.click(getDefenseButton("D2"));
@@ -182,7 +210,7 @@ describe("App 工作bench 交互", () => {
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
 
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
   });
 
   it("切换预设后结果清空且不自动提交", async () => {
@@ -190,13 +218,133 @@ describe("App 工作bench 交互", () => {
     // 先运行一次得到结果
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText("路径结果");
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
 
     // 切换预设 B
     fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
 
     // 不再有新的提交，结果面板回到 idle
-    expect(postEvaluation).toHaveBeenCalledTimes(1);
+    expect(postEvaluationMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/尚未运行/)).toBeInTheDocument();
+  });
+
+  it("同条件下显示基线 vs 当前对比", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+
+    // 首次无防御运行：当前运行即为基线，只提示、不显示差异
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+    expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument();
+
+    // 开启 D1：同 O/T 下自动出现对比
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(COMPARISON_TITLE);
+    expect(screen.getByText("由到达变为阻断")).toBeInTheDocument();
+    expect(screen.getByText("保持到达")).toBeInTheDocument();
+  });
+
+  it("O 变化使对比失效", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(COMPARISON_TITLE);
+
+    const oSlider = getOSlider();
+    fireEvent.input(oSlider, { target: { value: "1" } });
+    fireEvent.mouseUp(oSlider);
+
+    await waitFor(() =>
+      expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
+    );
+  });
+
+  it("补跑基线不修改当前防御与干预结果，且只发一次请求", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+
+    // 直接开 D1：没有同条件基线，出现提示与补跑按钮
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/当前 O\/T 尚无无防御基线/);
+    const callsBefore = postEvaluationMock.mock.calls.length;
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+    );
+    await screen.findByText(COMPARISON_TITLE);
+
+    // 只多一次请求，且该请求 defenses 为空
+    expect(postEvaluationMock.mock.calls.length).toBe(callsBefore + 1);
+    const baselineCall = postEvaluationMock.mock.calls[callsBefore][0] as RunInput;
+    expect(baselineCall.defenses).toEqual([]);
+
+    // D1 仍激活，当前干预结果未被覆盖（对比里 A 由到达变为阻断）
+    expect(getDefenseButton("D1")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("由到达变为阻断")).toBeInTheDocument();
+  });
+
+  it("过期基线响应不能恢复旧对比", async () => {
+    let resolveBaseline: ((result: RunResult) => void) | undefined;
+    postEvaluationMock.mockImplementation((input: RunInput) => {
+      if (input.defenses.length === 0) {
+        // 补跑基线：先挂起，稍后手动 resolve
+        return new Promise<RunResult>((resolve) => {
+          resolveBaseline = resolve;
+        });
+      }
+      return Promise.resolve(makeResult(input));
+    });
+    await renderWorkbench();
+
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/当前 O\/T 尚无无防御基线/);
+    fireEvent.click(
+      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+    );
+
+    // O 变化 → 基线失效；旧请求仍挂起
+    const oSlider = getOSlider();
+    fireEvent.input(oSlider, { target: { value: "1" } });
+    fireEvent.mouseUp(oSlider);
+
+    // 旧基线响应晚返回，不得恢复对比
+    await act(async () => {
+      resolveBaseline?.(makeResult(baselineInputFixture));
+    });
+
+    await waitFor(() =>
+      expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
+    );
+  });
+
+  it("切换预设使基线失效且不额外发请求", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(COMPARISON_TITLE);
+    const callsBefore = postEvaluationMock.mock.calls.length;
+
+    fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
+
+    await waitFor(() =>
+      expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
+    );
+    expect(postEvaluationMock.mock.calls.length).toBe(callsBefore);
+    expect(document.querySelectorAll(".defense-toggle.active").length).toBe(0);
     expect(screen.getByText(/尚未运行/)).toBeInTheDocument();
   });
 });
