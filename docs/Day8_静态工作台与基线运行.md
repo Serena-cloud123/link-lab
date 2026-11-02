@@ -42,7 +42,7 @@
 
 原始 Prompt 要点：只接场景、画静态图、运行无防御基线；前端从 `GET /api/scenarios/campus-registration` 读唯一场景；预设的 O/T 取自接口返回的 `preset.conditions`；点击"运行无防御基线"才发 POST；N1→N2 共享连线保留 A1/B1 逻辑映射；不重算成败；预设切换清旧结果；加载与运行各有等待/错误/重试。
 
-AI 方案要点：`App.tsx` 用 `scenarioState`（loading/error/ready）与 `runState`（idle/running/error/done）两个状态机；`api.ts` 封装两个 fetch；`ScenarioGraph.tsx` 按 `` `${from}->${to}` `` 去重生成 7 条物理边、边 `data.stepIds` 保留逻辑映射（共享边标签 "A1 / B1"）；`RunResultPanel.tsx` 纯展示 RunResult。图容器固定高度 560px（窄屏 420px）并引入 `@xyflow/react/dist/style.css`，`fitView` 生效。
+AI 方案要点：`App.tsx` 用 `scenarioState`（loading/error/ready）与 `runState`（idle/running/error/done）两个状态机；`api.ts` 封装两个 fetch；`ScenarioGraph.tsx` 按 `` `${from}->${to}` `` 去重生成 7 条物理边，`stepIds` 作为边对象的顶层属性（`GraphEdge extends Edge` 上定义）保留逻辑映射（共享边标签 "A1 / B1"）；`RunResultPanel.tsx` 纯展示 RunResult。图容器固定高度 560px（窄屏 420px）并引入 `@xyflow/react/dist/style.css`，`fitView` 生效。
 
 我的四点修正（均已落实）：
 
@@ -88,3 +88,6 @@ npm run test      apps/api 13 passed；packages/engine 23 passed
 `docs/Day7_推演接口与输入校验.md` 开头曾重复出现一次标题、今日目标与接口段落（Day 7 写入时未覆盖原文所致）。本次提交删除重复部分，保留带真实实施记录的后半份。未改写 Day 7 的提交历史。
 
 本记录随提交 `feat: 接通场景图与三预设基线推演` 一并提交。
+## 附：Day 8 文档记录修正
+
+Day 8 文档原写「边 `data.stepIds` 保留逻辑映射」，与代码实际不符：`ScenarioGraph.tsx` 中 `stepIds` 是 `GraphEdge extends Edge` 上定义的顶层属性，不在 `data` 内。本次仅改文档措辞，不改代码。
