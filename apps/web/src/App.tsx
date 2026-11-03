@@ -11,10 +11,13 @@ import type {
 import { fetchScenario, postEvaluation } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
+import { PlaybackBar } from "./components/PlaybackBar";
+import { CurrentEventPanel } from "./components/CurrentEventPanel";
 import {
   BaselineComparisonPanel,
   type BaselineSnapshot
 } from "./components/BaselineComparisonPanel";
+import { derivePlaybackView } from "./playback";
 import { oValueText, tValueText } from "./labels";
 
 type PageId = "intro" | "workbench" | "records";
@@ -76,6 +79,81 @@ export default function App() {
   const [baselineState, setBaselineState] = useState<BaselineState>({
     status: "idle"
   });
+  const [eventIndex, setEventIndex] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [runEpoch, setRunEpoch] = useState(0);
+
+  /**
+   * 动效开关初始值：
+   *   - localStorage 有值则遵循（隐私模式读写会抛 SecurityError，try/catch 兜底）
+   *   - 否则优先尊重系统 (prefers-reduced-motion: reduce)，默认开启。
+   */
+  const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(() => {
+    let stored: string | null = null;
+    try {
+      stored = window.localStorage.getItem("animationsEnabled");
+    } catch {
+      stored = null;
+    }
+    if (stored === "true") return true;
+    if (stored === "false") return false;
+    // 无持久化记录时，跟随系统设置
+    try {
+      return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      return true;
+    }
+  });
+
+  type MediaQueryListener = (mql: MediaQueryList) => void;
+
+  /** 订阅系统 prefers-reduced-motion 变化；cleanup 显式 removeEventListener。 */
+  useEffect(() => {
+    let query: MediaQueryList | null = null;
+    let handler: ((e: MediaQueryListEvent | MediaQueryList) => void) | null = null;
+    let hadError = false;
+    try {
+      query = window.matchMedia("(prefers-reduced-motion: reduce)");
+      handler = (e) => {
+        const matches =
+          "matches" in e ? (e as MediaQueryListEvent).matches : (e as MediaQueryList).matches;
+        if (matches) setAnimationsEnabled(false);
+      };
+      const q = query;
+      if (q && "addEventListener" in q && typeof q.addEventListener === "function") {
+        q.addEventListener("change", handler as (e: MediaQueryListEvent) => void);
+      } else if (q && typeof (q as MediaQueryList & { addListener?: MediaQueryListener }).addListener === "function") {
+        (q as MediaQueryList & { addListener: MediaQueryListener }).addListener(handler);
+      }
+    } catch {
+      hadError = true;
+    }
+    return () => {
+      if (hadError || !query || !handler) return;
+      try {
+        const q = query;
+        if ("removeEventListener" in q && typeof q.removeEventListener === "function") {
+          q.removeEventListener("change", handler as (e: MediaQueryListEvent) => void);
+        } else if (typeof (q as MediaQueryList & { removeListener?: MediaQueryListener }).removeListener === "function") {
+          (q as MediaQueryList & { removeListener: MediaQueryListener }).removeListener(handler);
+        }
+      } catch {
+        // 忽略 cleanup 异常
+      }
+    };
+  }, []);
+
+  function toggleAnimations() {
+    setAnimationsEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem("animationsEnabled", next ? "true" : "false");
+      } catch {
+        // 隐私模式或禁用存储时静默忽略
+      }
+      return next;
+    });
+  }
 
   // 同步真值（refs），state 仅作为渲染镜像
   const scenarioRef = useRef<Scenario | null>(null);
@@ -97,6 +175,9 @@ export default function App() {
     baselineVersionRef.current++;
     baselineInFlightRef.current = false;
     setBaselineState({ status: "idle" });
+    resetPlayback();
+    // 场景重载递增 runEpoch，让所有旧动画 DOM 卸载
+    setRunEpoch((e) => e + 1);
     try {
       const scenario = await fetchScenario();
       scenarioRef.current = scenario;
@@ -140,6 +221,12 @@ export default function App() {
     setBaselineState({ status: "idle" });
   }
 
+  /** 播放状态统一重置：暂停并回 0。只在 run()、handleSelectPreset()、loadScenario() 调用。 */
+  function resetPlayback() {
+    setPlaying(false);
+    setEventIndex(0);
+  }
+
   /**
    * 唯一的当前运行 POST 入口。始终用参数 nextConditions / nextDefenses 显式构造
    * input，不依赖可能滞后的 state。O/T 变化时同步使旧基线失效。
@@ -148,6 +235,9 @@ export default function App() {
     if (runningRef.current) return;
     const scenario = scenarioRef.current;
     if (!scenario) return;
+
+    // 提交任何新运行都使旧播放状态失效
+    resetPlayback();
 
     // 先与提交前的 O/T 比对：只有初始条件变化才使基线失效，切防御不失效
     const prev = conditionsRef.current;
@@ -180,6 +270,8 @@ export default function App() {
     try {
       const result = await postEvaluation(input);
       if (version !== runVersionRef.current || !mountedRef.current) return;
+      // 新响应到达：runEpoch 递增让所有旧动画 DOM 卸载重建
+      setRunEpoch((e) => e + 1);
       setRunState({ status: "done", result, input });
       // 本次就是无防御运行：把这份真实 input+result 直接作为同条件基线
       if (nextDefenses.length === 0) {
@@ -313,6 +405,9 @@ export default function App() {
     runningRef.current = false;
     // 切预设是另一条基线失效路径
     invalidateBaseline();
+    // 切预设使播放失效 + runEpoch 递增让动画 DOM 卸载
+    resetPlayback();
+    setRunEpoch((e) => e + 1);
 
     // 同步重置所有 ref
     const init: Conditions = { ...preset.conditions };
@@ -328,6 +423,69 @@ export default function App() {
     setPreview({ ...init });
     setDefenses([]);
     setRunState({ status: "idle" });
+  }
+
+  // --- 播放控制 ---
+
+  const events =
+    runState.status === "done" ? runState.result.events : [];
+  const eventsCount = events.length;
+
+  // 800ms 自动推进下标；到末尾自动停止；组件卸载/暂停/换配置 cleanup 清定时器
+  useEffect(() => {
+    if (!playing || eventsCount === 0) return;
+    if (eventIndex >= eventsCount - 1) {
+      setPlaying(false);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setEventIndex((prev) => {
+        if (prev >= eventsCount - 1) {
+          window.clearInterval(id);
+          setPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [playing, eventIndex, eventsCount]);
+
+  const playbackView =
+    runState.status === "done"
+      ? derivePlaybackView(runState.result, eventIndex)
+      : null;
+
+  function nodeLabel(id: string): string {
+    return scenarioRef.current?.nodes.find((n) => n.id === id)?.label ?? id;
+  }
+
+  function handleJump(index: number) {
+    setPlaying(false);
+    setEventIndex(index);
+  }
+
+  function handleNext() {
+    setPlaying(false);
+    setEventIndex((prev) =>
+      eventsCount === 0 ? 0 : Math.min(prev + 1, eventsCount - 1)
+    );
+  }
+
+  function handlePrev() {
+    setPlaying(false);
+    setEventIndex((prev) => Math.max(prev - 1, 0));
+  }
+
+  function handlePlayPause() {
+    if (eventsCount === 0) return;
+    if (eventIndex >= eventsCount - 1) {
+      // 到末尾按播放：回到 0 再播
+      setEventIndex(0);
+      setPlaying(true);
+      return;
+    }
+    setPlaying((prev) => !prev);
   }
 
   let content: ReactNode;
@@ -535,10 +693,26 @@ export default function App() {
 
         <section className="panel graph-panel" aria-label="节点关系图">
           <h2>{ready.title}</h2>
-          <ScenarioGraph scenario={ready} />
+          <ScenarioGraph
+            scenario={ready}
+            view={playbackView}
+            animationsEnabled={animationsEnabled}
+            runEpoch={runEpoch}
+          />
           <p className="hint">
             N1→N2 是路径 A/B 的共享物理连线（逻辑步骤 A1 与 B1）。
           </p>
+          <PlaybackBar
+            eventsCount={eventsCount}
+            eventIndex={eventIndex}
+            playing={playing}
+            animationsEnabled={animationsEnabled}
+            onAnimationsToggle={toggleAnimations}
+            onJump={handleJump}
+            onNext={handleNext}
+            onPrev={handlePrev}
+            onPlayPause={handlePlayPause}
+          />
         </section>
 
         <aside className="panel result-panel" aria-label="运行结果">
@@ -559,6 +733,11 @@ export default function App() {
           ) : null}
           {runState.status === "done" ? (
             <>
+              <CurrentEventPanel
+                result={runState.result}
+                eventIndex={eventIndex}
+                nodeLabel={nodeLabel}
+              />
               <RunResultPanel
                 scenario={ready}
                 result={runState.result}
@@ -591,7 +770,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <p className="stage">Day 10 · 同条件基线与干预对比</p>
+        <p className="stage">Day 11 · 事件播放与规则状态可视化（A 段 · 静态状态）</p>
         <nav className="topnav" aria-label="页面">
           {pages.map((item) => (
             <button

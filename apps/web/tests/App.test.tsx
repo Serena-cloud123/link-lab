@@ -75,31 +75,97 @@ const baselineInputFixture: RunInput = {
   defenses: []
 };
 
-/** 测试用返回值：仅用于驱动对比展示，不代表引擎规则。 */
+/** 测试用返回值：模拟引擎生成的 8 条事件，避免前端自己发明规则。 */
 function makeResult(input: RunInput): RunResult {
   const hasD1 = input.defenses.includes("D1");
+  const hasD2 = input.defenses.includes("D2");
   const hasD3 = input.defenses.includes("D3");
-  const pathA = hasD1
-    ? {
-        pathId: "A" as const,
-        outcome: "blocked" as const,
-        firstBlockedStepId: "A3" as const,
-        blockedReason: "D1 已开启，管理导出接口拒绝请求"
-      }
-    : { pathId: "A" as const, outcome: "reached" as const };
-  const pathB =
-    input.conditions.O === "closed"
-      ? {
-          pathId: "B" as const,
-          outcome: "blocked" as const,
-          firstBlockedStepId: "B2" as const,
-          blockedReason: "诊断页面对普通账号关闭，访问被拒绝"
-        }
-      : { pathId: "B" as const, outcome: "reached" as const };
+  const oOpen = input.conditions.O === "open";
+  const tGranted = input.conditions.T === "granted";
+  const b2Rejected = !oOpen;
+  const b5Rejected = !tGranted || hasD2;
+
+  const d1Reason = hasD1
+    ? "D1 已开启，管理导出接口拒绝请求"
+    : "D1 未开启，请求继续前往报名明细";
+
+  const b2Reason = oOpen
+    ? "诊断页面对普通账号开放，可继续访问"
+    : "诊断页面对普通账号关闭，访问被拒绝";
+
+  const tReason = tGranted
+    ? "服务令牌持有报名明细读取权限"
+    : "服务令牌无报名明细读取权限，请求被拒绝";
+  const d2Reason = hasD2
+    ? "D2 已开启，服务令牌权限已收紧，请求被拒绝"
+    : "D2 未开启，服务令牌权限未收紧";
+
   return {
-    events: [],
-    pathResults: [pathA, pathB],
-    alertCount: hasD3 ? 2 : 0
+    events: [
+      {
+        eventIndex: 0, pathId: "A", stepId: "A1",
+        fromNodeId: "N1", toNodeId: "N2", outcome: "passed", conditionChecks: []
+      },
+      {
+        eventIndex: 1, pathId: "A", stepId: "A2",
+        fromNodeId: "N2", toNodeId: "N3", outcome: "passed", conditionChecks: [],
+        ...(hasD3 ? { alert: { defenseId: "D3" as const, interfaceNodeId: "N3" as const, reason: "请求到达敏感接口 N3，D3 已记录告警" } } : {})
+      },
+      {
+        eventIndex: 2, pathId: "A", stepId: "A3",
+        fromNodeId: "N3", toNodeId: "N7",
+        outcome: hasD1 ? "rejected" : "data-arrived",
+        conditionChecks: [{ id: "D1", actualValue: hasD1, satisfied: !hasD1, reason: d1Reason }]
+      },
+      {
+        eventIndex: 3, pathId: "B", stepId: "B1",
+        fromNodeId: "N1", toNodeId: "N2", outcome: "passed", conditionChecks: []
+      },
+      {
+        eventIndex: 4, pathId: "B", stepId: "B2",
+        fromNodeId: "N2", toNodeId: "N4",
+        outcome: b2Rejected ? "rejected" : "passed",
+        conditionChecks: [{ id: "O", actualValue: input.conditions.O, satisfied: oOpen, reason: b2Reason }]
+      },
+      {
+        eventIndex: 5, pathId: "B", stepId: "B3",
+        fromNodeId: "N4", toNodeId: "N5",
+        outcome: b2Rejected ? "skipped" : "passed", conditionChecks: []
+      },
+      {
+        eventIndex: 6, pathId: "B", stepId: "B4",
+        fromNodeId: "N5", toNodeId: "N6",
+        outcome: b2Rejected ? "skipped" : "passed",
+        conditionChecks: [],
+        ...(!b2Rejected && hasD3 ? { alert: { defenseId: "D3" as const, interfaceNodeId: "N6" as const, reason: "请求到达敏感接口 N6，D3 已记录告警" } } : {})
+      },
+      {
+        eventIndex: 7, pathId: "B", stepId: "B5",
+        fromNodeId: "N6", toNodeId: "N7",
+        outcome: b2Rejected ? "skipped" : b5Rejected ? "rejected" : "data-arrived",
+        conditionChecks: b2Rejected ? [] : [
+          { id: "T", actualValue: input.conditions.T, satisfied: tGranted, reason: tReason },
+          { id: "D2", actualValue: hasD2, satisfied: !hasD2, reason: d2Reason }
+        ]
+      }
+    ],
+    pathResults: [
+      hasD1
+        ? { pathId: "A" as const, outcome: "blocked" as const, firstBlockedStepId: "A3" as const, blockedReason: d1Reason }
+        : { pathId: "A" as const, outcome: "reached" as const },
+      b2Rejected
+        ? { pathId: "B" as const, outcome: "blocked" as const, firstBlockedStepId: "B2" as const, blockedReason: b2Reason }
+        : b5Rejected
+          ? {
+              pathId: "B" as const, outcome: "blocked" as const, firstBlockedStepId: "B5" as const,
+              blockedReason: [
+                ...(tGranted ? [] : [tReason]),
+                ...(hasD2 ? [d2Reason] : [])
+              ].join("；")
+            }
+          : { pathId: "B" as const, outcome: "reached" as const }
+    ],
+    alertCount: hasD3 ? (oOpen ? 2 : 1) : 0
   };
 }
 
@@ -122,7 +188,6 @@ const COMPARISON_TITLE = "同条件对比：无防御基线 → 当前防御运�
 
 describe("App 工作台交互", () => {
   beforeEach(() => {
-    // 新增用例会按 input 定制返回值，必须彻底复位，避免污染既有用例
     vi.resetAllMocks();
     fetchScenarioMock.mockResolvedValue(scenarioFixture);
     postEvaluationMock.mockResolvedValue(okResult);
@@ -131,19 +196,15 @@ describe("App 工作台交互", () => {
   it("拖动滑块（input）不提交", async () => {
     await renderWorkbench();
     const oSlider = getOSlider();
-
     fireEvent.input(oSlider, { target: { value: "1" } });
-
     expect(postEvaluationMock).not.toHaveBeenCalled();
   });
 
   it("拖动后 mouseUp 提交一次，O=closed", async () => {
     await renderWorkbench();
     const oSlider = getOSlider();
-
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
-
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
     const input = postEvaluationMock.mock.calls[0][0] as RunInput;
     expect(input.conditions.O).toBe("closed");
@@ -152,31 +213,25 @@ describe("App 工作台交互", () => {
   it("拖到新值再拖回原位，mouseUp 不提交", async () => {
     await renderWorkbench();
     const oSlider = getOSlider();
-
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.input(oSlider, { target: { value: "0" } });
     fireEvent.mouseUp(oSlider);
-
     expect(postEvaluationMock).not.toHaveBeenCalled();
   });
 
   it("mouseUp 后再 blur 只提交一次（去重）", async () => {
     await renderWorkbench();
     const oSlider = getOSlider();
-
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
     fireEvent.blur(oSlider);
-
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
   });
 
   it("点击 D1 提交一次，defenses=['D1']", async () => {
     await renderWorkbench();
     const d1 = getDefenseButton("D1");
-
     fireEvent.click(d1);
-
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
     const input = postEvaluationMock.mock.calls[0][0] as RunInput;
     expect(input.defenses).toEqual(["D1"]);
@@ -191,39 +246,25 @@ describe("App 工作台交互", () => {
 
   it("运行中（永不 resolve）点击 D2 与拖动滑块均不产生新提交", async () => {
     await renderWorkbench();
-    // 让 postEvaluation 永不 resolve，使组件停在 running 状态
     postEvaluationMock.mockReturnValue(new Promise(() => {}));
-
-    // 触发一次运行进入 running
     fireEvent.click(getDefenseButton("D1"));
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "正在运行…" })
-      ).toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "正在运行…" })).toBeInTheDocument()
     );
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
-
-    // running 状态下点击 D2：不提交
     fireEvent.click(getDefenseButton("D2"));
-    // running 状态下拖动并释放滑块：不提交
     const oSlider = getOSlider();
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
-
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
   });
 
   it("切换预设后结果清空且不自动提交", async () => {
     await renderWorkbench();
-    // 先运行一次得到结果
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText("路径结果");
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
-
-    // 切换预设 B
     fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
-
-    // 不再有新的提交，结果面板回到 idle
     expect(postEvaluationMock).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/尚未运行/)).toBeInTheDocument();
   });
@@ -233,13 +274,9 @@ describe("App 工作台交互", () => {
       Promise.resolve(makeResult(input))
     );
     await renderWorkbench();
-
-    // 首次无防御运行：当前运行即为基线，只提示、不显示差异
     fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
     await screen.findByText(/当前运行即为无防御基线/);
     expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument();
-
-    // 开启 D1：同 O/T 下自动出现对比
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText(COMPARISON_TITLE);
     expect(screen.getByText("由到达变为阻断")).toBeInTheDocument();
@@ -251,16 +288,13 @@ describe("App 工作台交互", () => {
       Promise.resolve(makeResult(input))
     );
     await renderWorkbench();
-
     fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
     await screen.findByText(/当前运行即为无防御基线/);
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText(COMPARISON_TITLE);
-
     const oSlider = getOSlider();
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
-
     await waitFor(() =>
       expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
     );
@@ -271,23 +305,16 @@ describe("App 工作台交互", () => {
       Promise.resolve(makeResult(input))
     );
     await renderWorkbench();
-
-    // 直接开 D1：没有同条件基线，出现提示与补跑按钮
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText(/当前 O\/T 尚无无防御基线/);
     const callsBefore = postEvaluationMock.mock.calls.length;
-
     fireEvent.click(
       screen.getByRole("button", { name: "运行当前条件的无防御基线" })
     );
     await screen.findByText(COMPARISON_TITLE);
-
-    // 只多一次请求，且该请求 defenses 为空
     expect(postEvaluationMock.mock.calls.length).toBe(callsBefore + 1);
     const baselineCall = postEvaluationMock.mock.calls[callsBefore][0] as RunInput;
     expect(baselineCall.defenses).toEqual([]);
-
-    // D1 仍激活，当前干预结果未被覆盖（对比里 A 由到达变为阻断）
     expect(getDefenseButton("D1")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("由到达变为阻断")).toBeInTheDocument();
   });
@@ -296,7 +323,6 @@ describe("App 工作台交互", () => {
     let resolveBaseline: ((result: RunResult) => void) | undefined;
     postEvaluationMock.mockImplementation((input: RunInput) => {
       if (input.defenses.length === 0) {
-        // 补跑基线：先挂起，稍后手动 resolve
         return new Promise<RunResult>((resolve) => {
           resolveBaseline = resolve;
         });
@@ -304,23 +330,17 @@ describe("App 工作台交互", () => {
       return Promise.resolve(makeResult(input));
     });
     await renderWorkbench();
-
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText(/当前 O\/T 尚无无防御基线/);
     fireEvent.click(
       screen.getByRole("button", { name: "运行当前条件的无防御基线" })
     );
-
-    // O 变化 → 基线失效；旧请求仍挂起
     const oSlider = getOSlider();
     fireEvent.input(oSlider, { target: { value: "1" } });
     fireEvent.mouseUp(oSlider);
-
-    // 旧基线响应晚返回，不得恢复对比
     await act(async () => {
       resolveBaseline?.(makeResult(baselineInputFixture));
     });
-
     await waitFor(() =>
       expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
     );
@@ -331,20 +351,309 @@ describe("App 工作台交互", () => {
       Promise.resolve(makeResult(input))
     );
     await renderWorkbench();
-
     fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
     await screen.findByText(/当前运行即为无防御基线/);
     fireEvent.click(getDefenseButton("D1"));
     await screen.findByText(COMPARISON_TITLE);
     const callsBefore = postEvaluationMock.mock.calls.length;
-
     fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
-
     await waitFor(() =>
       expect(screen.queryByText(COMPARISON_TITLE)).not.toBeInTheDocument()
     );
     expect(postEvaluationMock.mock.calls.length).toBe(callsBefore);
     expect(document.querySelectorAll(".defense-toggle.active").length).toBe(0);
     expect(screen.getByText(/尚未运行/)).toBeInTheDocument();
+  });
+
+  // ===== Day 11 A 新增 =====
+
+  it("新结果从下标 0 开始，显示 A1；跳到 3 显示 B1；二者共用物理边但区分 stepId", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+
+    // 0 下标锚定 A1（图下固定一行）
+    expect(screen.getByText(/当前事件：路径 A · A1/)).toBeInTheDocument();
+    expect(screen.queryByText(/当前事件：路径 B · B1/)).not.toBeInTheDocument();
+
+    // 跳 3 下标锚定 B1
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 3" }));
+    await waitFor(() =>
+      expect(screen.getByText(/当前事件：路径 B · B1/)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/当前事件：路径 A · A1/)).not.toBeInTheDocument();
+  });
+
+  it("边界：下标 0 上一步禁用，下标 7 下一步禁用", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+
+    const prev = screen.getByRole("button", { name: "上一步" });
+    const next = screen.getByRole("button", { name: "下一步" });
+    expect(prev).toBeDisabled();
+    expect(next).not.toBeDisabled();
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 7" }));
+    await waitFor(() => expect(next).toBeDisabled());
+    expect(prev).not.toBeDisabled();
+  });
+
+  it("D1 开启：跳到下标 2，A3 显示已拒绝 + D1 未满足理由（来自引擎原样 reason）", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    // 取引擎原样 reason 做断言
+    const call = postEvaluationMock.mock.calls.find(
+      (c) => Array.isArray(c) && (c[0] as RunInput).defenses.includes("D1")
+    )?.[0] as RunInput;
+    const expected = makeResult(call).events[2].conditionChecks[0].reason;
+
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 2" }));
+    await waitFor(() => {
+      // 图下固定锚定 + 当前事件面板 outcome 标签（两处都有，用 getAllByText）
+      const anchors = screen.getAllByText(/当前事件：路径 A · A3/);
+      expect(anchors.length).toBeGreaterThan(0);
+      const rejectedLabels = screen.getAllByText(/已拒绝/);
+      expect(rejectedLabels.length).toBeGreaterThan(0);
+      // 理由原样出现（可能在 CurrentEventPanel 条件检查 + RunResultPanel 事件列表）
+      expect(screen.getAllByText(new RegExp(expected)).length).toBeGreaterThan(0);
+    });
+  });
+
+  it("O 关闭 + D3：跳到 4/5/6/7 → B2 已拒绝，B3-B5 未执行，B4 无告警", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
+    fireEvent.click(getDefenseButton("D3"));
+    await waitFor(() => {
+      // 运行后路径结果面板会出现路径 A / 路径 B 文字（两处来源），等事件列表出现
+      expect(
+        screen.queryByText(/暂无事件/)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "跳转到事件 7" })
+      ).toBeInTheDocument();
+    });
+
+    // 跳到 4：B2 已拒绝
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 4" }));
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(/当前事件：路径 B · B2/).length
+      ).toBeGreaterThan(0);
+      // outcome 标签有「已拒绝」
+      expect(screen.getAllByText(/已拒绝/).length).toBeGreaterThan(0);
+    });
+
+    // 跳到 5、6、7 都显示「未执行」
+    for (const idx of [5, 6, 7]) {
+      fireEvent.click(screen.getByRole("button", { name: `跳转到事件 ${idx}` }));
+      await waitFor(() =>
+        expect(screen.getAllByText(/未执行/).length).toBeGreaterThan(0)
+      );
+    }
+
+    // B4 在 B2 被拒后是 skipped，即使有 D3 也不会出现 alert 文案
+    expect(
+      screen.queryByText("检测到敏感请求，未自动阻断")
+    ).not.toBeInTheDocument();
+  });
+
+  it("无 D1 跳到 2：A3 显示数据到达 + 报名明细已到达", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(screen.getByRole("button", { name: "运行当前配置" }));
+    await screen.findByText(/当前运行即为无防御基线/);
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 2" }));
+    await waitFor(() => {
+      expect(
+        screen.getAllByText(/当前事件：路径 A · A3/).length
+      ).toBeGreaterThan(0);
+      expect(
+        screen.getAllByText(/报名明细已到达（模拟）/).length
+      ).toBeGreaterThan(0);
+    });
+  });
+
+  it("残余路径：A blocked + B reached 引用 B2/B5 原样 reason；两路 blocked 时纯函数层只输出总述且无「系统已安全」", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+
+    // 跑 D1：A blocked, B reached → 验证 B 仍到达的依据原样引用引擎 reason
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+    const call = postEvaluationMock.mock.calls.find(
+      (c) => Array.isArray(c) && (c[0] as RunInput).defenses.includes("D1")
+    )?.[0] as RunInput;
+    const r = makeResult(call);
+    const b2Reason = r.events[4].conditionChecks[0].reason;
+    const b5Reasons = r.events[7].conditionChecks.map((c) => c.reason);
+    expect(screen.getAllByText(new RegExp(b2Reason)).length).toBeGreaterThan(0);
+    for (const reason of b5Reasons) {
+      expect(screen.getAllByText(new RegExp(reason)).length).toBeGreaterThan(0);
+    }
+    expect(screen.queryByText(/系统已安全/)).not.toBeInTheDocument();
+  });
+
+  it("下标变化、上一步、下一步、跳转、播放都不触发 postEvaluation", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+    const callsBefore = postEvaluationMock.mock.calls.length;
+
+    // 上一步、下一步、跳转 7 全部不发请求
+    fireEvent.click(screen.getByRole("button", { name: "上一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 4" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 7" }));
+    expect(postEvaluationMock.mock.calls.length).toBe(callsBefore);
+
+    // 播放（800ms 会自动推进一次）也不发请求
+    fireEvent.click(screen.getByRole("button", { name: "播放" }));
+    // 让它跑过一次自动推进
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 900));
+    });
+    expect(postEvaluationMock.mock.calls.length).toBe(callsBefore);
+  });
+
+  it("重置：跳到中间后切换防御 → 下标回到 0；切预设 → 播放条禁用", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 6" }));
+    await waitFor(() =>
+      expect(screen.getByText(/当前事件：路径 B · B4/)).toBeInTheDocument()
+    );
+
+    // 关 D1 再重跑（toggleDefense 触发 run）
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/当前运行即为无防御基线/);
+    await waitFor(() =>
+      expect(screen.getByText(/当前事件：路径 A · A1/)).toBeInTheDocument()
+    );
+    expect(
+      screen.queryByText(/当前事件：路径 B · B4/)
+    ).not.toBeInTheDocument();
+
+    // 切预设 → runState 回到 idle → 播放条显示「暂无事件」
+    fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
+    await waitFor(() =>
+      expect(screen.getByText(/暂无事件/)).toBeInTheDocument()
+    );
+  });
+
+  it("播放到末尾自动暂停", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    // 跳到 6，点播放 → 自动推进到 7，然后自动停
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 6" }));
+    fireEvent.click(screen.getByRole("button", { name: "播放" }));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1700));
+    });
+    expect(
+      screen.getByRole("button", { name: "播放" })
+    ).toBeInTheDocument();
+  });
+
+  // ===== Day 11 B 新增 =====
+
+  it("关闭动画后主状态（文字、徽标、残余路径）完整可读", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    // 确保动画当前处于开启态（先按标题找按钮；aria-label 是 "关闭动画"/"开启动画"）
+    const animBtn = screen.getByRole("button", { name: /动画/ });
+    if (animBtn.getAttribute("aria-pressed") === "false") {
+      fireEvent.click(animBtn);
+    }
+    // 再关一次：此时必为 "关闭动画" aria-label（即关状态）
+    fireEvent.click(screen.getByRole("button", { name: "关闭动画" }));
+
+    // 静态状态全部完整可读（CSS keyframes 只是视觉层；DOM + 文字不受影响）
+    expect(screen.getByText(/当前事件：路径 A · A1/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/路径 B 仍到达模拟数据/)
+    ).toBeInTheDocument();
+
+    // B 仍到达的依据（引擎原样 reason）仍在
+    const call = postEvaluationMock.mock.calls.find(
+      (c) => Array.isArray(c) && (c[0] as RunInput).defenses.includes("D1")
+    )?.[0] as RunInput;
+    const r = makeResult(call);
+    const b2Reason = r.events[4].conditionChecks[0].reason;
+    expect(screen.getAllByText(new RegExp(b2Reason)).length).toBeGreaterThan(0);
+  });
+
+  it("prefers-reduced-motion: reduce 时动效默认关闭", async () => {
+    // 清空 localStorage，让 animationsEnabled 初始值完全依赖 matchMedia
+    try {
+      window.localStorage.removeItem("animationsEnabled");
+    } catch {
+      // 隐私模式忽略
+    }
+    // 必须在任何组件渲染前替换 matchMedia；否则 useState 的 initializer 已经跑了。
+    const origMatchMedia = window.matchMedia;
+    const mockMedia = {
+      matches: true,
+      media: "(prefers-reduced-motion: reduce)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      onchange: null
+    } as unknown as MediaQueryList;
+    window.matchMedia = vi.fn().mockReturnValue(mockMedia);
+    try {
+      render(<App />);
+      await screen.findByText("进入沙盘工作台");
+      fireEvent.click(screen.getByText("进入沙盘工作台"));
+      await screen.findByLabelText("运行配置");
+      // 动效默认关闭时 aria-label 为 "开启动画"
+      expect(
+        screen.getByRole("button", { name: "开启动画" })
+      ).toBeInTheDocument();
+    } finally {
+      window.matchMedia = origMatchMedia;
+      try {
+        window.localStorage.removeItem("animationsEnabled");
+      } catch {
+        // 忽略
+      }
+    }
   });
 });
