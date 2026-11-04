@@ -41,3 +41,11 @@
 - 链 02 的原始证据是 `iterations/02_原始对话_Day7-11.md`（约 198 KB，未删改），整理稿为 `iterations/02_两档滑块与规则流线.md`。
 - 链 03 在真实开始前不建占位文件，避免出现未经发生的内容；封存日再整理。
 - 界面截图统一放 `docs/screenshots/`。
+
+## 冻结范围口径
+
+「冻结文件全程未改」指的是：`packages/engine/src/**`、`scenarios/campus-registration/v1.json`、`packages/engine/tests/expected-runs.csv`，从 Day 1 至当前提交始终未变。
+
+`packages/contracts/src/index.ts` 在 Day 12 有一次纯追加：新增 `packages/contracts/src/records.ts` 承载运行快照类型，`index.ts` 末尾只追加一行 re-export。该次改动 `git diff --numstat` 为 `1 0`，删除行数为 0，未修改任何既有类型、字段或枚举值。详见 `docs/Day12_运行保存与模板解释.md`。
+
+`apps/api/src/app.ts` 自 Day 12 起属正常开发范围（新增路由接线），不再列入每日冻结检查。每日冻结检查命令为：

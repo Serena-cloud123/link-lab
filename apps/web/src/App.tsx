@@ -4,11 +4,12 @@ import type {
   OValue,
   PresetId,
   RunInput,
+  RunRecord,
   RunResult,
   Scenario,
   TValue
 } from "@link-lab/contracts";
-import { fetchScenario, postEvaluation } from "./api";
+import { fetchScenario, postEvaluation, saveRun } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -46,6 +47,20 @@ type BaselineState =
   | { status: "error"; message: string }
   | { status: "done"; snapshot: BaselineSnapshot };
 
+type SaveState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "saved"; record: RunRecord; runVersion: number }
+  | { status: "error"; message: string; runVersion: number };
+
+const EXPLANATION_SOURCE_LABELS: Record<RunRecord["explanationSource"], string> = {
+  template: "规则模板"
+};
+
+function explanationSourceLabel(source: RunRecord["explanationSource"]): string {
+  return EXPLANATION_SOURCE_LABELS[source] ?? source;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -82,6 +97,7 @@ export default function App() {
   const [eventIndex, setEventIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [runEpoch, setRunEpoch] = useState(0);
+  const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
 
   /**
    * 动效开关初始值：
@@ -165,6 +181,9 @@ export default function App() {
   const runVersionRef = useRef(0);
   const runningRef = useRef(false);
   const mountedRef = useRef(true);
+  // 保存轨道：token 标记最近一次有效保存请求；新一轮运行/切预设/场景重载都会使其作废
+  const saveTokenRef = useRef(0);
+  const saveInFlightRef = useRef(false);
   // 基线独立轨道：版本号 + 在途标记，与当前运行互不相干
   const baselineVersionRef = useRef(0);
   const baselineInFlightRef = useRef(false);
@@ -175,6 +194,8 @@ export default function App() {
     baselineVersionRef.current++;
     baselineInFlightRef.current = false;
     setBaselineState({ status: "idle" });
+    // 场景重载时在途保存响应一并作废
+    invalidateSave();
     resetPlayback();
     // 场景重载递增 runEpoch，让所有旧动画 DOM 卸载
     setRunEpoch((e) => e + 1);
@@ -221,6 +242,12 @@ export default function App() {
     setBaselineState({ status: "idle" });
   }
 
+  /** 使在途保存响应与保存展示失效：新运行、切预设、场景重载时调用。 */
+  function invalidateSave() {
+    saveTokenRef.current++;
+    setSaveState({ status: "idle" });
+  }
+
   /** 播放状态统一重置：暂停并回 0。只在 run()、handleSelectPreset()、loadScenario() 调用。 */
   function resetPlayback() {
     setPlaying(false);
@@ -235,6 +262,9 @@ export default function App() {
     if (runningRef.current) return;
     const scenario = scenarioRef.current;
     if (!scenario) return;
+
+    // 新一轮运行开始：在途保存响应作废，避免旧保存归属到新配置
+    invalidateSave();
 
     // 提交任何新运行都使旧播放状态失效
     resetPlayback();
@@ -393,6 +423,36 @@ export default function App() {
     void run(conditionsRef.current, defensesRef.current);
   }
 
+  /**
+   * 显式保存当前成功运行。只发送该次 runState.input 快照；
+   * 响应返回时若 token/runVersion 已变（新运行、切预设、场景重载），静默丢弃。
+   */
+  async function handleSaveRun() {
+    if (runState.status !== "done") return;
+    if (saveInFlightRef.current) return;
+    const input = runState.input;
+    const version = runVersionRef.current;
+    const token = ++saveTokenRef.current;
+    saveInFlightRef.current = true;
+    setSaveState({ status: "saving" });
+    try {
+      const record = await saveRun(input);
+      if (token !== saveTokenRef.current || version !== runVersionRef.current) return;
+      if (!mountedRef.current) return;
+      setSaveState({ status: "saved", record, runVersion: version });
+    } catch (error) {
+      if (token !== saveTokenRef.current || version !== runVersionRef.current) return;
+      if (!mountedRef.current) return;
+      setSaveState({
+        status: "error",
+        message: errorMessage(error),
+        runVersion: version
+      });
+    } finally {
+      saveInFlightRef.current = false;
+    }
+  }
+
   function handleSelectPreset(id: PresetId) {
     if (runningRef.current) return;
     const scenario = scenarioRef.current;
@@ -403,6 +463,8 @@ export default function App() {
     // 使在途响应失效
     runVersionRef.current++;
     runningRef.current = false;
+    // 切预设：在途保存响应作废
+    invalidateSave();
     // 切预设是另一条基线失效路径
     invalidateBaseline();
     // 切预设使播放失效 + runEpoch 递增让动画 DOM 卸载
@@ -493,7 +555,7 @@ export default function App() {
     content = (
       <section className="panel records" aria-labelledby="records-title">
         <h2 id="records-title">学习记录</h2>
-        <p>保存与回放后续开放。当前版本不保存任何运行，本页没有历史记录。</p>
+        <p>已支持在沙盘工作台显式保存一次成功运行；列表与回放将在下一阶段接入。</p>
         <p className="hint">
           后续开放后，这里会列出你保存的运行，可逐条回放并核对当时的事件与条件。
         </p>
@@ -743,6 +805,38 @@ export default function App() {
                 result={runState.result}
                 input={runState.input}
               />
+              <div className="save-run">
+                {saveState.status === "saved" &&
+                saveState.runVersion === runVersionRef.current ? (
+                  <div className="notice" role="status">
+                    <p>
+                      已保存运行 #{saveState.record.id}（保存时间{" "}
+                      {saveState.record.savedAt}）
+                    </p>
+                    <p>
+                      一句话解释（
+                      {explanationSourceLabel(saveState.record.explanationSource)}
+                      ）：{saveState.record.explanation}
+                    </p>
+                  </div>
+                ) : null}
+                {saveState.status === "error" &&
+                saveState.runVersion === runVersionRef.current ? (
+                  <p className="notice error" role="alert">
+                    保存失败：{saveState.message}
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  className="run-button"
+                  disabled={saveState.status === "saving"}
+                  onClick={() => void handleSaveRun()}
+                >
+                  {saveState.status === "saving"
+                    ? "正在保存…"
+                    : "保存此配置的推演"}
+                </button>
+              </div>
               {baselineSnapshot &&
               baselineMatches &&
               runState.input.conditions.O === conditions.O &&
@@ -770,7 +864,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <p className="stage">Day 11 · 事件播放与规则状态可视化（A 段 · 静态状态）</p>
+        <p className="stage">Day 12 · 显式保存与规则解释</p>
         <nav className="topnav" aria-label="页面">
           {pages.map((item) => (
             <button

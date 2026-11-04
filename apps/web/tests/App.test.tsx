@@ -1,18 +1,20 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { RunInput, RunResult, Scenario } from "@link-lab/contracts";
+import type { RunInput, RunRecord, RunResult, Scenario } from "@link-lab/contracts";
 import App from "../src/App";
 
 vi.mock("../src/api", () => ({
   fetchScenario: vi.fn(),
-  postEvaluation: vi.fn()
+  postEvaluation: vi.fn(),
+  saveRun: vi.fn()
 }));
 
-import { fetchScenario, postEvaluation } from "../src/api";
+import { fetchScenario, postEvaluation, saveRun } from "../src/api";
 
 type MockFn = ReturnType<typeof vi.fn>;
 const fetchScenarioMock = fetchScenario as unknown as MockFn;
 const postEvaluationMock = postEvaluation as unknown as MockFn;
+const saveRunMock = saveRun as unknown as MockFn;
 
 const scenarioFixture: Scenario = {
   id: "campus-registration",
@@ -169,6 +171,22 @@ function makeResult(input: RunInput): RunResult {
   };
 }
 
+/** 模拟服务器保存成功的返回：id/savedAt/解释均来自响应，不由前端生成。 */
+function makeSavedRecord(input: RunInput): RunRecord {
+  return {
+    id: "record-fixed-id-001",
+    savedAt: "2026-11-04T10:20:30.000Z",
+    scenarioId: input.scenarioId,
+    scenarioVersion: 1,
+    input,
+    result: makeResult(input),
+    explanation:
+      "路径 A 在 A3 被阻断（D1 已开启，管理导出接口拒绝请求），但路径 B 仍到达模拟数据；本次未产生告警。",
+    explanationSource: "template",
+    explanationVersion: 1
+  };
+}
+
 async function renderWorkbench() {
   render(<App />);
   await screen.findByText("进入沙盘工作台");
@@ -191,6 +209,9 @@ describe("App 工作台交互", () => {
     vi.resetAllMocks();
     fetchScenarioMock.mockResolvedValue(scenarioFixture);
     postEvaluationMock.mockResolvedValue(okResult);
+    saveRunMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeSavedRecord(input))
+    );
   });
 
   it("拖动滑块（input）不提交", async () => {
@@ -655,5 +676,199 @@ describe("App 工作台交互", () => {
         // 忽略
       }
     }
+  });
+});
+
+// ===== Day 12 显式保存 =====
+
+describe("Day 12 显式保存", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    fetchScenarioMock.mockResolvedValue(scenarioFixture);
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    saveRunMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeSavedRecord(input))
+    );
+  });
+
+  it("顶部阶段标题更新为 Day 12，学习记录页如实说明保存支持", async () => {
+    render(<App />);
+    await screen.findByText(/Day 12 · 显式保存与规则解释/);
+    fireEvent.click(screen.getByRole("button", { name: "学习记录" }));
+    expect(
+      screen.getByText(/已支持在沙盘工作台显式保存一次成功运行/)
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/不保存任何运行/)).not.toBeInTheDocument();
+  });
+
+  it("尚未运行时不显示保存入口", async () => {
+    await renderWorkbench();
+    expect(
+      screen.queryByRole("button", { name: "保存此配置的推演" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("保存成功：请求体只有 RunInput 快照，成功提示取响应的 id/savedAt/解释", async () => {
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    expect(saveRunMock).toHaveBeenCalledTimes(1);
+    const payload = saveRunMock.mock.calls[0][0] as RunInput;
+    expect(payload).toEqual({
+      scenarioId: "campus-registration",
+      presetId: "A",
+      conditions: { O: "open", T: "granted" },
+      defenses: ["D1"]
+    });
+    expect(payload).not.toHaveProperty("result");
+    expect(payload).not.toHaveProperty("explanation");
+
+    await screen.findByText(/已保存运行 #record-fixed-id-001/);
+    expect(
+      screen.getByText(/保存时间\s*2026-11-04T10:20:30\.000Z/)
+    ).toBeInTheDocument();
+    expect(screen.getByText(/一句话解释（\s*规则模板/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/路径 A 在 A3 被阻断（D1 已开启，管理导出接口拒绝请求）/)
+    ).toBeInTheDocument();
+  });
+
+  it("保存中按钮禁用，重复点击不产生第二次请求", async () => {
+    let resolveSave: (() => void) | undefined;
+    saveRunMock.mockImplementation(
+      (input: RunInput) =>
+        new Promise<RunRecord>((resolve) => {
+          resolveSave = () => resolve(makeSavedRecord(input));
+        })
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    const savingButton = await screen.findByRole("button", {
+      name: "正在保存…"
+    });
+    expect(savingButton).toBeDisabled();
+    fireEvent.click(savingButton);
+    expect(saveRunMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSave?.();
+    });
+    await screen.findByText(/已保存运行 #record-fixed-id-001/);
+  });
+
+  it("保存失败显示错误且不伪装成功，重试后展示成功", async () => {
+    saveRunMock
+      .mockRejectedValueOnce(new Error("HTTP 500"))
+      .mockImplementation((input: RunInput) =>
+        Promise.resolve(makeSavedRecord(input))
+      );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    await screen.findByText(/保存失败：HTTP 500/);
+    expect(screen.queryByText(/已保存运行/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    await screen.findByText(/已保存运行 #record-fixed-id-001/);
+    expect(saveRunMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("保存未返回时开始新一轮运行，旧保存响应不错误归属新配置", async () => {
+    let resolveSave: (() => void) | undefined;
+    saveRunMock.mockImplementation(
+      (input: RunInput) =>
+        new Promise<RunRecord>((resolve) => {
+          resolveSave = () => resolve(makeSavedRecord(input));
+        })
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    await screen.findByRole("button", { name: "正在保存…" });
+
+    // 保存仍在途：关掉 D1，触发新一轮无防御运行
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/当前运行即为无防御基线/);
+
+    // 旧保存响应此刻才返回，不得把新运行标记为已保存
+    await act(async () => {
+      resolveSave?.();
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/已保存运行/)).not.toBeInTheDocument()
+    );
+    expect(
+      screen.getByRole("button", { name: "保存此配置的推演" })
+    ).toBeEnabled();
+  });
+
+  it("保存未返回时切预设，旧保存响应不显示", async () => {
+    let resolveSave: (() => void) | undefined;
+    saveRunMock.mockImplementation(
+      (input: RunInput) =>
+        new Promise<RunRecord>((resolve) => {
+          resolveSave = () => resolve(makeSavedRecord(input));
+        })
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    fireEvent.click(screen.getByRole("button", { name: "保存此配置的推演" }));
+    await screen.findByRole("button", { name: "正在保存…" });
+
+    fireEvent.click(screen.getByText("预设 B：O 关 T 有"));
+    await screen.findByText(/尚未运行/);
+
+    await act(async () => {
+      resolveSave?.();
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/已保存运行/)).not.toBeInTheDocument()
+    );
+    expect(
+      screen.queryByRole("button", { name: "保存此配置的推演" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("滑块、防御切换、基线补跑、播放跳转均不调用 saveRun", async () => {
+    await renderWorkbench();
+
+    // 防御切换触发运行（此时无同条件基线）
+    fireEvent.click(getDefenseButton("D1"));
+    await waitFor(() => expect(postEvaluationMock).toHaveBeenCalledTimes(1));
+
+    // 滑块提交触发运行
+    const oSlider = getOSlider();
+    fireEvent.input(oSlider, { target: { value: "1" } });
+    fireEvent.mouseUp(oSlider);
+    await waitFor(() => expect(postEvaluationMock).toHaveBeenCalledTimes(2));
+
+    // 再切防御触发运行
+    fireEvent.click(getDefenseButton("D3"));
+    await waitFor(() => expect(postEvaluationMock).toHaveBeenCalledTimes(3));
+
+    // 补跑无防御基线
+    fireEvent.click(
+      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+    );
+    await waitFor(() => expect(postEvaluationMock).toHaveBeenCalledTimes(4));
+
+    // 播放/跳转属于纯本地操作
+    fireEvent.click(screen.getByRole("button", { name: "跳转到事件 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "下一步" }));
+
+    expect(saveRunMock).not.toHaveBeenCalled();
   });
 });

@@ -4,7 +4,9 @@
 
 ## 当前阶段
 
-Day 11：事件播放与规则状态可视化。工作台按 `eventIndex` 播放八条事件，静态状态全部由 `RunResult.events` 派生：passed 高亮、rejected 停靠被拒、skipped 灰显未执行、data-arrived 标记 N7、alert 徽标挂在 `alert.interfaceNodeId` 且不改主流线状态。动效严格限定在动画白名单内——流线推进、拒绝停靠回弹、到达穿透、D3 侧向脉冲；关闭动效或系统减少动态效果时，同一事件下标的文字与静态状态完整可读。A1/B1 共用 N1→N2 物理连线但高亮始终按 pathId + stepId 区分。残余路径说明原样引用引擎已记录的条件检查，两路阻断时只写「两条已建模路径均未到达模拟数据」。前端交互与纯函数测试共 35 项。运行保存、模板解释落库、历史回放仍未实现。
+Day 12：显式保存与规则模板解释。工作台的「运行结果」面板底部有「保存此配置的推演」入口，仅在当前运行成功（`done`）时出现；点击后只把该次运行的 `RunInput` 快照提交到 `POST /api/runs`，服务器用同一个确定性引擎重算 `RunResult`，生成一句规则模板解释，连同输入、结果、场景版本一次性写入 SQLite，返回记录 ID。`GET /api/runs/:id` 只读库，不重新推演、不重新生成解释。原有 `POST /api/evaluations` 保持无持久化，滑块、防御开关与基线补跑都不自动保存。历史列表与逐帧回放、版本核对仍未实现。
+
+「一句话解释（规则模板）」由确定性模板生成，不是大模型输出；界面按响应的 `explanationSource` 字段标注来源。
 
 ## 学习目标
 
@@ -25,7 +27,7 @@ Day 11：事件播放与规则状态可视化。工作台按 `eventIndex` 播放
 
 ## 运行方法
 
-环境：Node.js v24.21.0，npm 11.19.0，Git 2.53.0.windows.2。使用内置 `node:sqlite`，本阶段尚未连接数据库。
+环境：Node.js v24.21.0，npm 11.19.0，Git 2.53.0.windows.2。使用 Node 内置 `node:sqlite`，无 ORM。数据库默认落在 `apps/api/data/link-lab.db`，目录自动创建，`src` 启动与 `dist` 启动指向同一文件；可用 `DATABASE_PATH` 覆盖（相对路径以仓库根为基准）。
 
 ```powershell
 npm install
@@ -66,6 +68,23 @@ Invoke-RestMethod http://127.0.0.1:3001/api/scenarios/campus-registration
 ```powershell
 Invoke-RestMethod -Method Post http://127.0.0.1:3001/api/evaluations -ContentType 'application/json' -Body '{"scenarioId":"campus-registration","conditions":{"O":"open","T":"granted"},"defenses":["D1","D3"]}'
 ```
+保存一次推演（A-101：O 开、T 有、D1+D3）：
+
+```powershell
+$body = @{
+  scenarioId = "campus-registration"
+  conditions = @{ O = "open"; T = "granted" }
+  defenses = @("D1", "D3")
+} | ConvertTo-Json -Depth 8
+
+$saved = Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:3001/api/runs `
+  -ContentType 'application/json' `
+  -Body $body
+
+$saved.id
+$saved.explanation
+
 
 预期：`pathResults` 为 A `blocked`、B `reached`，`alertCount` 为 2，`events` 共 8 条。
 
