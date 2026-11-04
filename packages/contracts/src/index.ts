@@ -132,3 +132,4 @@ export interface RunResult {
   pathResults: PathResult[];
   alertCount: number;
 }
+export type { RunRecord, RunSnapshot, SaveRunResponse } from "./records.js";

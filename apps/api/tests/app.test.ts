@@ -6,7 +6,7 @@ import { buildServer } from "../src/app";
 let app: FastifyInstance;
 
 beforeAll(async () => {
-  app = buildServer({ logger: false });
+  app = buildServer({ logger: false }, { dbPath: ":memory:" });
 });
 
 afterAll(async () => {
