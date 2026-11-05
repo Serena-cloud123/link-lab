@@ -3,6 +3,10 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import type {
+  LearningFeedback,
+  LearningQuestion,
+  LearningQuestionId,
+  LearningRecord,
   RunInput,
   RunRecord,
   RunResult,
@@ -20,6 +24,22 @@ const RUNS_TABLE_SQL = `
     explanation TEXT NOT NULL,
     explanation_source TEXT NOT NULL,
     explanation_version INTEGER NOT NULL
+  )
+`;
+
+/**
+ * 学习记录独立建表，run_id 建 UNIQUE：同一运行重复提交为覆盖，
+ * 不保留历史答案。
+ */
+const LEARNING_TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS learning_records (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL UNIQUE,
+    saved_at TEXT NOT NULL,
+    questions_json TEXT NOT NULL,
+    predictions_json TEXT NOT NULL,
+    feedbacks_json TEXT NOT NULL,
+    resumed_event_index INTEGER
   )
 `;
 
@@ -64,6 +84,38 @@ const LIST_RUNS_SQL = `
   ORDER BY saved_at DESC, rowid DESC
 `;
 
+/** 单条语句覆盖写入，不先查再写。 */
+const UPSERT_LEARNING_SQL = `
+  INSERT INTO learning_records (
+    id,
+    run_id,
+    saved_at,
+    questions_json,
+    predictions_json,
+    feedbacks_json,
+    resumed_event_index
+  ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(run_id) DO UPDATE SET
+    saved_at = excluded.saved_at,
+    questions_json = excluded.questions_json,
+    predictions_json = excluded.predictions_json,
+    feedbacks_json = excluded.feedbacks_json,
+    resumed_event_index = excluded.resumed_event_index
+`;
+
+const SELECT_LEARNING_BY_RUN_SQL = `
+  SELECT
+    id,
+    run_id,
+    saved_at,
+    questions_json,
+    predictions_json,
+    feedbacks_json,
+    resumed_event_index
+  FROM learning_records
+  WHERE run_id = ?
+`;
+
 /**
  * 默认库位置由 import.meta.url 推导：
  * apps/api/src/db.ts 与 apps/api/dist/db.js 向上三级都是仓库根，
@@ -90,6 +142,7 @@ export function openRunDatabase(dbPath: string): DatabaseSync {
   }
   const db = new DatabaseSync(dbPath);
   db.exec(RUNS_TABLE_SQL);
+  db.exec(LEARNING_TABLE_SQL);
   return db;
 }
 
@@ -176,6 +229,69 @@ export function createRunStore(db: DatabaseSync): RunStore {
     listRuns(): RunSummary[] {
       const rows = listStatement.all() as unknown as RunSummaryRow[];
       return rows.map(parseSummaryRow);
+    }
+  };
+}
+
+/* ---------- 学习记录存储 ---------- */
+
+export interface LearningStore {
+  /** 单条语句覆盖写入；返回库中实际存储的行（id 首次写入后保持稳定）。 */
+  upsert(record: LearningRecord): LearningRecord;
+  findByRunId(runId: string): LearningRecord | undefined;
+}
+
+interface LearningRow {
+  id: string;
+  run_id: string;
+  saved_at: string;
+  questions_json: string;
+  predictions_json: string;
+  feedbacks_json: string;
+  resumed_event_index: number | bigint | null;
+}
+
+function parseLearningRow(row: LearningRow): LearningRecord {
+  return {
+    id: row.id,
+    runId: row.run_id,
+    savedAt: row.saved_at,
+    questions: JSON.parse(row.questions_json) as LearningQuestion[],
+    predictions: JSON.parse(row.predictions_json) as Record<
+      LearningQuestionId,
+      string
+    >,
+    feedbacks: JSON.parse(row.feedbacks_json) as LearningFeedback[],
+    resumedEventIndex:
+      row.resumed_event_index === null ? null : Number(row.resumed_event_index)
+  };
+}
+
+export function createLearningStore(db: DatabaseSync): LearningStore {
+  const upsertStatement = db.prepare(UPSERT_LEARNING_SQL);
+  const selectStatement = db.prepare(SELECT_LEARNING_BY_RUN_SQL);
+
+  return {
+    upsert(record: LearningRecord): LearningRecord {
+      upsertStatement.run(
+        record.id,
+        record.runId,
+        record.savedAt,
+        JSON.stringify(record.questions),
+        JSON.stringify(record.predictions),
+        JSON.stringify(record.feedbacks),
+        record.resumedEventIndex
+      );
+      // 写后读回，保证覆盖写入时返回的是库中真实行（id 稳定）
+      const row = selectStatement.get(record.runId) as LearningRow | undefined;
+      if (!row) {
+        throw new Error(`学习记录写入后读取失败：runId=${record.runId}`);
+      }
+      return parseLearningRow(row);
+    },
+    findByRunId(runId: string): LearningRecord | undefined {
+      const row = selectStatement.get(runId) as LearningRow | undefined;
+      return row ? parseLearningRow(row) : undefined;
     }
   };
 }

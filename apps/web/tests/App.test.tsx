@@ -8,10 +8,22 @@ vi.mock("../src/api", () => ({
   postEvaluation: vi.fn(),
   saveRun: vi.fn(),
   listRuns: vi.fn(),
-  getRun: vi.fn()
+  getRun: vi.fn(),
+  getLearningQuestions: vi.fn(),
+  saveLearning: vi.fn(),
+  getRunLearning: vi.fn()
 }));
 
-import { fetchScenario, getRun, listRuns, postEvaluation, saveRun } from "../src/api";
+import {
+  fetchScenario,
+  getLearningQuestions,
+  getRun,
+  getRunLearning,
+  listRuns,
+  postEvaluation,
+  saveLearning,
+  saveRun
+} from "../src/api";
 
 type MockFn = ReturnType<typeof vi.fn>;
 const fetchScenarioMock = fetchScenario as unknown as MockFn;
@@ -19,6 +31,9 @@ const postEvaluationMock = postEvaluation as unknown as MockFn;
 const saveRunMock = saveRun as unknown as MockFn;
 const listRunsMock = listRuns as unknown as MockFn;
 const getRunMock = getRun as unknown as MockFn;
+const getLearningQuestionsMock = getLearningQuestions as unknown as MockFn;
+const saveLearningMock = saveLearning as unknown as MockFn;
+const getRunLearningMock = getRunLearning as unknown as MockFn;
 
 const scenarioFixture: Scenario = {
   id: "campus-registration",
@@ -216,6 +231,9 @@ describe("App 工作台交互", () => {
     saveRunMock.mockImplementation((input: RunInput) =>
       Promise.resolve(makeSavedRecord(input))
     );
+    listRunsMock.mockResolvedValue([]);
+    getLearningQuestionsMock.mockResolvedValue([]);
+    getRunLearningMock.mockResolvedValue(null);
   });
 
   it("拖动滑块（input）不提交", async () => {
@@ -696,6 +714,8 @@ describe("Day 12 显式保存", () => {
       Promise.resolve(makeSavedRecord(input))
     );
     listRunsMock.mockResolvedValue([]);
+    getLearningQuestionsMock.mockResolvedValue([]);
+    getRunLearningMock.mockResolvedValue(null);
   });
 
   it("顶部阶段标题更新为 Day 12，学习记录页显示空状态而非旧占位符", async () => {

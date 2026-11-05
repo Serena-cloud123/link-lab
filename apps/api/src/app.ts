@@ -2,14 +2,30 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
-import type { RunInput, RunRecord, Scenario } from "@link-lab/contracts";
+import type {
+  LearningRecord,
+  RunInput,
+  RunRecord,
+  SaveLearningRequest,
+  Scenario
+} from "@link-lab/contracts";
 import { evaluateRun } from "@link-lab/engine";
-import { createRunStore, openRunDatabase, resolveDatabasePath } from "./db.ts";
+import {
+  createLearningStore,
+  createRunStore,
+  openRunDatabase,
+  resolveDatabasePath
+} from "./db.ts";
 import {
   EXPLANATION_SOURCE,
   EXPLANATION_VERSION,
   buildRunExplanation
 } from "./explanation.ts";
+import {
+  LEARNING_QUESTIONS,
+  buildLearningFeedback,
+  validatePredictions
+} from "./learning.ts";
 
 const scenarioUrl = new URL(
   "../../../scenarios/campus-registration/v1.json",
@@ -57,6 +73,33 @@ const runInputSchema = {
   }
 };
 
+/**
+ * 学习记录提交体：只接收 runId、三题预测与可选恢复下标。
+ * additionalProperties: false 会拒绝 answers / feedbacks 等越权字段，
+ * 后端不信任客户端给出的正确答案或路径结论。
+ */
+const learningInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["runId", "predictions"],
+  properties: {
+    runId: { type: "string", minLength: 1 },
+    predictions: {
+      type: "object",
+      additionalProperties: false,
+      required: ["Q1", "Q2", "Q3"],
+      properties: {
+        Q1: { type: "string" },
+        Q2: { type: "string" },
+        Q3: { type: "string" }
+      }
+    },
+    resumedEventIndex: {
+      anyOf: [{ type: "integer", minimum: 0 }, { type: "null" }]
+    }
+  }
+};
+
 export interface StorageOptions {
   dbPath?: string;
 }
@@ -75,6 +118,7 @@ export function buildServer(
     storageOptions.dbPath ?? resolveDatabasePath()
   );
   const runStore = createRunStore(db);
+  const learningStore = createLearningStore(db);
   let databaseClosed = false;
   app.addHook("onClose", async () => {
     if (databaseClosed) return;
@@ -160,6 +204,91 @@ export function buildServer(
         statusCode: 500,
         error: "Internal Server Error",
         message: "读取运行记录失败"
+      });
+    }
+  });
+
+  /* ---------- 三题与学习记录 ---------- */
+
+  app.get("/api/learning/questions", async () => ({
+    // 只下发题干、选项与固定配置；correctOption 只在 POST 响应里出现
+    questions: LEARNING_QUESTIONS
+  }));
+
+  app.post(
+    "/api/learning",
+    { schema: { body: learningInputSchema } },
+    async (request, reply) => {
+      const body = request.body as SaveLearningRequest;
+      try {
+        if (!runStore.findById(body.runId)) {
+          return reply.code(404).send({
+            statusCode: 404,
+            error: "Not Found",
+            message: "运行记录不存在"
+          });
+        }
+
+        // 只校验选项是否属于该题；对错完全由后端推演决定
+        const invalid = validatePredictions(body.predictions);
+        if (invalid) {
+          return reply.code(400).send({
+            statusCode: 400,
+            error: "Bad Request",
+            message: invalid
+          });
+        }
+
+        const feedbacks = buildLearningFeedback(scenario, body.predictions);
+        const record: LearningRecord = {
+          id: randomUUID(),
+          runId: body.runId,
+          savedAt: new Date().toISOString(),
+          questions: LEARNING_QUESTIONS,
+          predictions: body.predictions,
+          feedbacks,
+          resumedEventIndex: body.resumedEventIndex ?? null
+        };
+
+        // 同一 runId 覆盖写入（UNIQUE + ON CONFLICT）
+        return reply.code(200).send(learningStore.upsert(record));
+      } catch (error) {
+        request.log.error(error);
+        return reply.code(500).send({
+          statusCode: 500,
+          error: "Internal Server Error",
+          message: "保存学习记录失败"
+        });
+      }
+    }
+  );
+
+  app.get("/api/runs/:id/learning", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      if (!runStore.findById(id)) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: "运行记录不存在"
+        });
+      }
+      const record = learningStore.findByRunId(id);
+      if (!record) {
+        // 与「运行不存在」区分：前端把这条当正常空态处理
+        return reply.code(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: "该运行暂无学习记录"
+        });
+      }
+      return record;
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(500).send({
+        statusCode: 500,
+        error: "Internal Server Error",
+        message: "读取学习记录失败"
       });
     }
   });

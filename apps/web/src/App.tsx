@@ -1,16 +1,31 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type {
   DefenseId,
+  LearningFeedback,
+  LearningQuestion,
+  LearningQuestionId,
+  LearningRecord,
   OValue,
+  PathFinalOutcome,
   PresetId,
   RunInput,
   RunRecord,
   RunResult,
   RunSummary,
+  SaveLearningRequest,
   Scenario,
   TValue
 } from "@link-lab/contracts";
-import { fetchScenario, getRun, listRuns, postEvaluation, saveRun } from "./api";
+import {
+  fetchScenario,
+  getLearningQuestions,
+  getRun,
+  getRunLearning,
+  listRuns,
+  postEvaluation,
+  saveLearning,
+  saveRun
+} from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -59,6 +74,25 @@ type RecordsListState =
   | { status: "loading" }
   | { status: "error"; message: string }
   | { status: "done"; summaries: RunSummary[] };
+
+type QuestionsState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; questions: LearningQuestion[] };
+
+type QuizState =
+  | { status: "idle" }
+  | { status: "saving" }
+  | { status: "done"; record: LearningRecord; runVersion: number }
+  | { status: "error"; message: string; runVersion: number };
+
+type SelectedLearningState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "none" }
+  | { status: "error"; message: string }
+  | { status: "done"; record: LearningRecord };
 
 const EXPLANATION_SOURCE_LABELS: Record<RunRecord["explanationSource"], string> = {
   template: "规则模板"
@@ -116,6 +150,19 @@ export default function App() {
   const [selectedRunEpoch, setSelectedRunEpoch] = useState(0);
   /** 每次切换记录递增，让在途 GET 详情响应被丢弃。 */
   const selectedFetchTokenRef = useRef(0);
+
+  /* ---------- 三题与学习记录状态 ---------- */
+  const [questionsState, setQuestionsState] = useState<QuestionsState>({
+    status: "idle"
+  });
+  const [quizPredictions, setQuizPredictions] = useState<
+    Partial<Record<LearningQuestionId, string>>
+  >({});
+  const [quizState, setQuizState] = useState<QuizState>({ status: "idle" });
+  /** 提交学习记录的在途令牌，新一轮运行会作废旧响应。 */
+  const quizTokenRef = useRef(0);
+  const [selectedLearning, setSelectedLearning] =
+    useState<SelectedLearningState>({ status: "idle" });
 
   /**
    * 动效开关初始值：
@@ -264,6 +311,10 @@ export default function App() {
   function invalidateSave() {
     saveTokenRef.current++;
     setSaveState({ status: "idle" });
+    // 学习记录关联的是一次具体运行，运行失效时预测与反馈一并清空
+    quizTokenRef.current++;
+    setQuizState({ status: "idle" });
+    setQuizPredictions({});
   }
 
   /** 播放状态统一重置：暂停并回 0。只在 run()、handleSelectPreset()、loadScenario() 调用。 */
@@ -458,28 +509,135 @@ export default function App() {
 
   /** 点击历史列表中的一条 → 拉详情，独立于工作台。 */
   async function handleSelectRecord(id: string) {
-    // 取消上一条在途详情请求
+    // 取消上一条在途详情请求与学习记录请求
     const token = ++selectedFetchTokenRef.current;
     setSelectedRecord(null);
     setSelectedEventIndex(0);
     setSelectedPlaying(false);
     setSelectedRunEpoch((e) => e + 1);
+    setSelectedLearning({ status: "loading" });
 
     try {
       const record = await getRun(id);
       if (token !== selectedFetchTokenRef.current) return; // 已切到下一条
       if (!mountedRef.current) return;
       setSelectedRecord(record);
+      void loadSelectedLearning(id, token, record.result.events.length);
     } catch (error) {
       if (token !== selectedFetchTokenRef.current) return;
       if (!mountedRef.current) return;
       // 详情加载失败时清除选中
       setSelectedRecord(null);
-      // 把错误塞进 recordsList 状态的方式太绕，这里只抛给 UI 用 alert 处理
-      // 或干脆静默（用户再点一次即可）
+      setSelectedLearning({ status: "idle" });
       console.error("加载运行详情失败：", error);
     }
   }
+
+  /**
+   * 读取记录关联的学习记录。
+   * 「该运行暂无学习记录」是正常空态（api 层返回 null），不是错误。
+   */
+  async function loadSelectedLearning(
+    runId: string,
+    token: number,
+    eventsCount: number
+  ) {
+    try {
+      const record = await getRunLearning(runId);
+      if (token !== selectedFetchTokenRef.current) return;
+      if (!mountedRef.current) return;
+      if (!record) {
+        setSelectedLearning({ status: "none" });
+        return;
+      }
+      setSelectedLearning({ status: "done", record });
+      // 恢复保存学习记录时的播放下标（夹在有效范围内）
+      if (record.resumedEventIndex !== null && eventsCount > 0) {
+        setSelectedEventIndex(
+          Math.min(Math.max(record.resumedEventIndex, 0), eventsCount - 1)
+        );
+      }
+    } catch (error) {
+      if (token !== selectedFetchTokenRef.current) return;
+      if (!mountedRef.current) return;
+      setSelectedLearning({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  /* ---------- 三题：加载、作答与提交 ---------- */
+
+  async function fetchLearningQuestions() {
+    setQuestionsState({ status: "loading" });
+    try {
+      const questions = await getLearningQuestions();
+      if (!mountedRef.current) return;
+      setQuestionsState({ status: "done", questions });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setQuestionsState({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  function handlePredict(questionId: LearningQuestionId, optionId: string) {
+    if (quizState.status === "saving") return;
+    setQuizPredictions((prev) => ({ ...prev, [questionId]: optionId }));
+  }
+
+  async function handleSubmitLearning() {
+    if (saveState.status !== "saved") return;
+    if (questionsState.status !== "done") return;
+    if (quizState.status === "saving") return;
+
+    const missing = questionsState.questions.some(
+      (question) => quizPredictions[question.id] === undefined
+    );
+    if (missing) return;
+
+    const targetRunVersion = saveState.runVersion;
+    if (targetRunVersion !== runVersionRef.current) return;
+
+    const token = ++quizTokenRef.current;
+    setQuizState({ status: "saving" });
+
+    const request: SaveLearningRequest = {
+      runId: saveState.record.id,
+      predictions: {
+        Q1: quizPredictions.Q1!,
+        Q2: quizPredictions.Q2!,
+        Q3: quizPredictions.Q3!
+      },
+      resumedEventIndex: eventIndex
+    };
+
+    try {
+      const record = await saveLearning(request);
+      if (token !== quizTokenRef.current) return;
+      if (!mountedRef.current) return;
+      if (targetRunVersion !== runVersionRef.current) return;
+      setQuizState({
+        status: "done",
+        record,
+        runVersion: targetRunVersion
+      });
+    } catch (error) {
+      if (token !== quizTokenRef.current) return;
+      if (!mountedRef.current) return;
+      if (targetRunVersion !== runVersionRef.current) return;
+      setQuizState({
+        status: "error",
+        message: errorMessage(error),
+        runVersion: targetRunVersion
+      });
+    }
+  }
+
+  /** 进入工作台且场景就绪时加载一次题目元数据。 */
+  useEffect(() => {
+    if (page !== "workbench" || scenarioState.status !== "ready") return;
+    if (questionsState.status !== "idle") return;
+    void fetchLearningQuestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, scenarioState.status, questionsState.status]);
 
   /**
    * page 切换 effect：
@@ -495,6 +653,7 @@ export default function App() {
       setSelectedRecord(null);
       setSelectedPlaying(false);
       setSelectedRunEpoch((e) => e + 1);
+      setSelectedLearning({ status: "idle" });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page]);
@@ -519,6 +678,80 @@ export default function App() {
     }, 800);
     return () => window.clearInterval(id);
   }, [selectedPlaying, selectedEventIndex, selectedRecord, selectedRunEpoch]);
+
+  /* ---------- 题目展示辅助 ---------- */
+
+  function questionConfigText(question: LearningQuestion): string {
+    const defenseText =
+      question.config.defenses.length > 0
+        ? `防御 ${question.config.defenses.join("、")}`
+        : "无防御";
+    return `预设 ${question.config.presetId} · O ${oValueText[question.config.conditions.O]} · T ${tValueText[question.config.conditions.T]} · ${defenseText}`;
+  }
+
+  function optionTextOf(
+    questions: LearningQuestion[],
+    questionId: LearningQuestionId,
+    optionId: string | null
+  ): string {
+    if (optionId === null) return "未作答";
+    const question = questions.find((item) => item.id === questionId);
+    const option = question?.options.find((item) => item.id === optionId);
+    return option ? `${option.id}. ${option.text}` : optionId;
+  }
+
+  function outcomeText(outcome: PathFinalOutcome): string {
+    return outcome === "reached" ? "到达" : "阻断";
+  }
+
+  function renderFeedbackList(
+    questions: LearningQuestion[],
+    feedbacks: LearningFeedback[]
+  ): ReactNode {
+    return (
+      <ul className="learning-feedbacks">
+        {feedbacks.map((feedback) => (
+          <li
+            key={feedback.questionId}
+            className={
+              feedback.isCorrect ? "feedback-correct" : "feedback-incorrect"
+            }
+          >
+            <p>
+              <strong>{feedback.questionId}</strong> ·{" "}
+              {feedback.isCorrect ? "回答正确" : "回答错误"}
+            </p>
+            <p>
+              你的预测：
+              {optionTextOf(
+                questions,
+                feedback.questionId,
+                feedback.predictedOption
+              )}
+            </p>
+            <p>
+              正确答案：
+              {optionTextOf(
+                questions,
+                feedback.questionId,
+                feedback.correctOption
+              )}
+            </p>
+            <p>条件依据：{feedback.conditionBasis}</p>
+            <p className="hint">
+              引擎事实（按本题固定配置推演）：路径 A{" "}
+              {outcomeText(feedback.evidence.pathA)} · 路径 B{" "}
+              {outcomeText(feedback.evidence.pathB)} · 告警{" "}
+              {feedback.evidence.alertCount} 条
+              {feedback.evidence.blockedStepId
+                ? ` · 首个阻断步骤 ${feedback.evidence.blockedStepId}`
+                : ""}
+            </p>
+          </li>
+        ))}
+      </ul>
+    );
+  }
 
   /* ---------- 记录页播放控制（独立函数，复用 PlaybackBar） ---------- */
 
@@ -575,6 +808,9 @@ export default function App() {
       if (token !== saveTokenRef.current || version !== runVersionRef.current) return;
       if (!mountedRef.current) return;
       setSaveState({ status: "saved", record, runVersion: version });
+      // 新保存记录对应新的 runId，旧一轮学习反馈作废（预测保留）
+      quizTokenRef.current++;
+      setQuizState({ status: "idle" });
     } catch (error) {
       if (token !== saveTokenRef.current || version !== runVersionRef.current) return;
       if (!mountedRef.current) return;
@@ -814,6 +1050,36 @@ export default function App() {
               </div>
             </>
           )}
+          {selectedRecord !== null ? (
+            <div className="record-learning" aria-label="学习记录">
+              <h3>学习记录</h3>
+              {selectedLearning.status === "loading" ? (
+                <p className="notice">正在读取学习记录…</p>
+              ) : null}
+              {selectedLearning.status === "none" ? (
+                <p className="hint">这条运行还没有保存三题学习记录。</p>
+              ) : null}
+              {selectedLearning.status === "error" ? (
+                <p className="notice error" role="alert">
+                  学习记录读取失败：{selectedLearning.message}
+                </p>
+              ) : null}
+              {selectedLearning.status === "done" ? (
+                <>
+                  <p className="hint">
+                    保存于 {selectedLearning.record.savedAt} · 恢复播放下标{" "}
+                    {selectedLearning.record.resumedEventIndex === null
+                      ? "未记录"
+                      : selectedLearning.record.resumedEventIndex}
+                  </p>
+                  {renderFeedbackList(
+                    selectedLearning.record.questions,
+                    selectedLearning.record.feedbacks
+                  )}
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </section>
       </section>
     );
@@ -1092,6 +1358,109 @@ export default function App() {
                     ? "正在保存…"
                     : "保存此配置的推演"}
                 </button>
+              </div>
+              <div className="learning-quiz" aria-label="三题自测">
+                <h3>三题自测</h3>
+                <p className="hint">
+                  每题都用它自己的固定配置独立推演，与上方工作台当前配置无关，也不评价眼前这次运行。
+                </p>
+                {questionsState.status === "loading" ? (
+                  <p className="notice">正在加载题目…</p>
+                ) : null}
+                {questionsState.status === "error" ? (
+                  <div className="notice error" role="alert">
+                    <p>题目加载失败：{questionsState.message}</p>
+                    <button
+                      type="button"
+                      onClick={() => void fetchLearningQuestions()}
+                    >
+                      重试
+                    </button>
+                  </div>
+                ) : null}
+                {questionsState.status === "done" ? (
+                  <>
+                    {questionsState.questions.map((question) => (
+                      <div className="quiz-question" key={question.id}>
+                        <p className="quiz-prompt">
+                          <strong>{question.id}</strong> · {question.prompt}
+                        </p>
+                        <p className="quiz-config">
+                          本题固定配置：{questionConfigText(question)}
+                        </p>
+                        <div
+                          className="quiz-options"
+                          role="radiogroup"
+                          aria-label={`${question.id} 选项`}
+                        >
+                          {question.options.map((option) => {
+                            const selected =
+                              quizPredictions[question.id] === option.id;
+                            return (
+                              <button
+                                key={option.id}
+                                type="button"
+                                className={`quiz-option ${selected ? "active" : ""}`}
+                                aria-pressed={selected}
+                                disabled={quizState.status === "saving"}
+                                onClick={() =>
+                                  handlePredict(question.id, option.id)
+                                }
+                              >
+                                {option.id}. {option.text}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    <div className="quiz-actions">
+                      <button
+                        type="button"
+                        className="run-button"
+                        disabled={
+                          quizState.status === "saving" ||
+                          saveState.status !== "saved" ||
+                          saveState.runVersion !== runVersionRef.current ||
+                          questionsState.questions.some(
+                            (question) =>
+                              quizPredictions[question.id] === undefined
+                          )
+                        }
+                        onClick={() => void handleSubmitLearning()}
+                      >
+                        {quizState.status === "saving"
+                          ? "正在提交…"
+                          : "提交三题预测并保存学习记录"}
+                      </button>
+                      {saveState.status !== "saved" ||
+                      saveState.runVersion !== runVersionRef.current ? (
+                        <p className="hint">
+                          先保存本次运行，才能把三题预测与这条运行关联。
+                        </p>
+                      ) : null}
+                    </div>
+                    {quizState.status === "error" &&
+                    quizState.runVersion === runVersionRef.current ? (
+                      <p className="notice error" role="alert">
+                        提交失败：{quizState.message}
+                      </p>
+                    ) : null}
+                    {quizState.status === "done" &&
+                    quizState.runVersion === runVersionRef.current ? (
+                      <>
+                        <p className="notice" role="status">
+                          学习记录已保存 #{quizState.record.id}
+                          （同一运行重复提交会覆盖，不保留历史答案）
+                        </p>
+                        {renderFeedbackList(
+                          quizState.record.questions,
+                          quizState.record.feedbacks
+                        )}
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
               </div>
               {baselineSnapshot &&
               baselineMatches &&

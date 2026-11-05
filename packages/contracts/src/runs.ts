@@ -1,10 +1,8 @@
 import type {
-  ConditionId,
   DefenseId,
   OValue,
   PathResult,
   PresetId,
-  RunInput,
   TValue
 } from "./index.js";
 

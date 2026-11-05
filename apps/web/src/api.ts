@@ -1,8 +1,12 @@
 import type {
+  LearningQuestion,
+  LearningRecord,
+  ListLearningQuestionsResponse,
   RunInput,
   RunRecord,
   RunResult,
   RunSummary,
+  SaveLearningRequest,
   Scenario
 } from "@link-lab/contracts";
 
@@ -90,4 +94,70 @@ export async function getRun(id: string): Promise<RunRecord> {
   }
   if (!response.ok) await throwHttpError(response);
   return (await response.json()) as RunRecord;
+}
+
+/* ---------- 三题与学习记录 ---------- */
+
+export async function getLearningQuestions(): Promise<LearningQuestion[]> {
+  let response: Response;
+  try {
+    response = await fetch("/api/learning/questions");
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!response.ok) await throwHttpError(response);
+  const body = (await response.json()) as ListLearningQuestionsResponse;
+  return body.questions;
+}
+
+export async function saveLearning(
+  request: SaveLearningRequest
+): Promise<LearningRecord> {
+  let response: Response;
+  try {
+    response = await fetch("/api/learning", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request)
+    });
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!response.ok) await throwHttpError(response);
+  return (await response.json()) as LearningRecord;
+}
+
+/**
+ * 读取某条运行关联的学习记录。
+ * 404 分两种：message「该运行暂无学习记录」是正常空态，返回 null；
+ * message「运行记录不存在」或其他错误照常抛出。
+ */
+export async function getRunLearning(
+  runId: string
+): Promise<LearningRecord | null> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/runs/${runId}/learning`);
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (response.status === 404) {
+    let message: string | undefined;
+    try {
+      const body = (await response.json()) as { message?: string };
+      message = body.message;
+    } catch {
+      message = undefined;
+    }
+    if (message === "该运行暂无学习记录") return null;
+    throw new Error(`HTTP 404：${message ?? "未知错误"}`);
+  }
+  if (!response.ok) await throwHttpError(response);
+  return (await response.json()) as LearningRecord;
 }

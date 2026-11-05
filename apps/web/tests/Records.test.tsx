@@ -21,10 +21,22 @@ vi.mock("../src/api", () => ({
   postEvaluation: vi.fn(),
   saveRun: vi.fn(),
   listRuns: vi.fn(),
-  getRun: vi.fn()
+  getRun: vi.fn(),
+  getLearningQuestions: vi.fn(),
+  saveLearning: vi.fn(),
+  getRunLearning: vi.fn()
 }));
 
-import { fetchScenario, getRun, listRuns, postEvaluation, saveRun } from "../src/api";
+import {
+  fetchScenario,
+  getLearningQuestions,
+  getRun,
+  getRunLearning,
+  listRuns,
+  postEvaluation,
+  saveLearning,
+  saveRun
+} from "../src/api";
 
 type MockFn = ReturnType<typeof vi.fn>;
 const fetchScenarioMock = fetchScenario as unknown as MockFn;
@@ -32,6 +44,9 @@ const postEvaluationMock = postEvaluation as unknown as MockFn;
 const saveRunMock = saveRun as unknown as MockFn;
 const listRunsMock = listRuns as unknown as MockFn;
 const getRunMock = getRun as unknown as MockFn;
+const getLearningQuestionsMock = getLearningQuestions as unknown as MockFn;
+const saveLearningMock = saveLearning as unknown as MockFn;
+const getRunLearningMock = getRunLearning as unknown as MockFn;
 
 /* ---------- Fixtures ---------- */
 
@@ -186,6 +201,8 @@ describe("Day 13 — 历史列表与回放", () => {
     fetchScenarioMock.mockResolvedValue(scenarioFixture);
     listRunsMock.mockResolvedValue([]);
     getRunMock.mockResolvedValue(makeRecord("rec-1"));
+    getLearningQuestionsMock.mockResolvedValue([]);
+    getRunLearningMock.mockResolvedValue(null);
   });
 
   /* a. 空库空状态 */
