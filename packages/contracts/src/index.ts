@@ -135,3 +135,4 @@ export interface RunResult {
 export type { RunRecord, RunSnapshot, SaveRunResponse } from "./records.js";
 export type { RunSummary, ListRunsResponse } from "./runs.js";
 export type { LearningEngineEvidence, LearningFeedback, LearningOption, LearningQuestion, LearningQuestionConfig, LearningQuestionId, LearningRecord, ListLearningQuestionsResponse, SaveLearningRequest, SaveLearningResponse } from "./learning.js";
+export type { VerifyRunResponse, VerifyStatus } from "./verify.js";

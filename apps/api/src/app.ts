@@ -26,6 +26,7 @@ import {
   buildLearningFeedback,
   validatePredictions
 } from "./learning.ts";
+import { verifyRunRecord } from "./verify.ts";
 
 const scenarioUrl = new URL(
   "../../../scenarios/campus-registration/v1.json",
@@ -204,6 +205,33 @@ export function buildServer(
         statusCode: 500,
         error: "Internal Server Error",
         message: "读取运行记录失败"
+      });
+    }
+  });
+
+  /**
+   * 显式版本核对：只读。
+   * 不写库、不重新生成解释、不改已保存事件与学习记录。
+   * 用 POST 表达「执行一次核对」，不使用 GET /api/runs/:id/verification。
+   */
+  app.post("/api/runs/:id/verify", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    try {
+      const record = runStore.findById(id);
+      if (!record) {
+        return reply.code(404).send({
+          statusCode: 404,
+          error: "Not Found",
+          message: "运行记录不存在"
+        });
+      }
+      return verifyRunRecord(scenario, record);
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(500).send({
+        statusCode: 500,
+        error: "Internal Server Error",
+        message: "核对运行记录失败"
       });
     }
   });

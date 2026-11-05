@@ -1158,6 +1158,59 @@ h3 {
   margin: 0 0 4px;
 }
 
+/* ---------- 显式版本核对 ---------- */
+
+.record-verify {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid #2c3b49;
+  border-radius: 10px;
+  background: #111b24;
+}
+
+.verify-button {
+  align-self: flex-start;
+  padding: 8px 14px;
+  border: 1px solid #47617a;
+  border-radius: 8px;
+  background: #1d2a35;
+  color: #d7e3ec;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.88rem;
+}
+
+.verify-button:hover {
+  background: #243543;
+}
+
+.verify-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.verify-result p {
+  margin: 0 0 4px;
+}
+
+.verify-match p {
+  color: #7fc8b5;
+}
+
+.verify-result-mismatch > p:first-child,
+.verify-version-mismatch > p:first-child {
+  color: #e6c788;
+}
+
+.verify-differences {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 0.82rem;
+  color: #8fa3b7;
+}
+
 .record-explanation {
   padding: 12px 14px;
   border: 1px solid #2c3b49;

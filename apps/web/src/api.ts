@@ -7,7 +7,8 @@ import type {
   RunResult,
   RunSummary,
   SaveLearningRequest,
-  Scenario
+  Scenario,
+  VerifyRunResponse
 } from "@link-lab/contracts";
 
 async function throwHttpError(response: Response): Promise<never> {
@@ -160,4 +161,20 @@ export async function getRunLearning(
   }
   if (!response.ok) await throwHttpError(response);
   return (await response.json()) as LearningRecord;
+}
+
+/* ---------- 显式版本核对 ---------- */
+
+/** 只读核对：POST 表达「执行一次核对」，后端不写库。 */
+export async function verifyRun(id: string): Promise<VerifyRunResponse> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/runs/${id}/verify`, { method: "POST" });
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!response.ok) await throwHttpError(response);
+  return (await response.json()) as VerifyRunResponse;
 }

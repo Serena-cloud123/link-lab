@@ -11,7 +11,8 @@ vi.mock("../src/api", () => ({
   getRun: vi.fn(),
   getLearningQuestions: vi.fn(),
   saveLearning: vi.fn(),
-  getRunLearning: vi.fn()
+  getRunLearning: vi.fn(),
+  verifyRun: vi.fn()
 }));
 
 import {

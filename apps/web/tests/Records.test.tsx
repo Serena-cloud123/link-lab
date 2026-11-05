@@ -12,7 +12,8 @@ import type {
   RunSummary,
   Scenario,
   StepId,
-  TValue
+  TValue,
+  VerifyRunResponse
 } from "@link-lab/contracts";
 import App from "../src/App";
 
@@ -24,7 +25,8 @@ vi.mock("../src/api", () => ({
   getRun: vi.fn(),
   getLearningQuestions: vi.fn(),
   saveLearning: vi.fn(),
-  getRunLearning: vi.fn()
+  getRunLearning: vi.fn(),
+  verifyRun: vi.fn()
 }));
 
 import {
@@ -35,7 +37,8 @@ import {
   listRuns,
   postEvaluation,
   saveLearning,
-  saveRun
+  saveRun,
+  verifyRun
 } from "../src/api";
 
 type MockFn = ReturnType<typeof vi.fn>;
@@ -47,6 +50,7 @@ const getRunMock = getRun as unknown as MockFn;
 const getLearningQuestionsMock = getLearningQuestions as unknown as MockFn;
 const saveLearningMock = saveLearning as unknown as MockFn;
 const getRunLearningMock = getRunLearning as unknown as MockFn;
+const verifyRunMock = verifyRun as unknown as MockFn;
 
 /* ---------- Fixtures ---------- */
 
@@ -187,6 +191,14 @@ function makeRecord(id: string, scenarioVersion: number = 1): RunRecord {
 
 /* ---------- 测试 ---------- */
 
+const matchResponse: VerifyRunResponse = {
+  status: "match",
+  recordScenarioId: "campus-registration",
+  recordScenarioVersion: 1,
+  currentScenarioId: "campus-registration",
+  currentScenarioVersion: 1
+};
+
 async function renderApp() {
   render(<App />);
   // 等待场景加载
@@ -203,6 +215,7 @@ describe("Day 13 — 历史列表与回放", () => {
     getRunMock.mockResolvedValue(makeRecord("rec-1"));
     getLearningQuestionsMock.mockResolvedValue([]);
     getRunLearningMock.mockResolvedValue(null);
+    verifyRunMock.mockResolvedValue(matchResponse);
   });
 
   /* a. 空库空状态 */
@@ -453,5 +466,203 @@ describe("Day 13 — 历史列表与回放", () => {
       // rec-fast-2 的 summary 有 O 关
       expect(selectedButtons[0].textContent).toContain("O 关");
     });
+  });
+});
+
+/* ---------- 段 C：显式版本核对 ---------- */
+
+function verifyButton(): HTMLElement {
+  return screen.getByRole("button", { name: "核对当前版本" });
+}
+
+async function clickFirstRecord(conditionText: RegExp) {
+  await waitFor(() => {
+    const items = screen.queryAllByRole("button").filter(
+      (b) => b.textContent?.match(conditionText) ?? false
+    );
+    expect(items.length).toBeGreaterThan(0);
+  });
+  const item = screen.queryAllByRole("button").find(
+    (b) => b.textContent?.match(conditionText) ?? false
+  );
+  expect(item).toBeDefined();
+  fireEvent.click(item!);
+  // 事件面板在两种版本状态下都会渲染「流向：」
+  await screen.findByText(/流向：/);
+}
+
+describe("Day 13 — 显式版本核对（前端）", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    fetchScenarioMock.mockResolvedValue(scenarioFixture);
+    getRunMock.mockResolvedValue(makeRecord("rec-1"));
+    getLearningQuestionsMock.mockResolvedValue([]);
+    getRunLearningMock.mockResolvedValue(null);
+    verifyRunMock.mockResolvedValue(matchResponse);
+  });
+
+  it("未选中记录时不显示核对按钮，选中后才出现", async () => {
+    listRunsMock.mockResolvedValue([
+      makeSummary("rec-1", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0)
+    ]);
+
+    await renderApp();
+    expect(
+      screen.queryByRole("button", { name: "核对当前版本" })
+    ).not.toBeInTheDocument();
+
+    await clickFirstRecord(/防御 D1/);
+    expect(verifyButton()).toBeInTheDocument();
+  });
+
+  it("match：显示「此记录与当前同版本规则重算一致」", async () => {
+    listRunsMock.mockResolvedValue([
+      makeSummary("rec-1", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0)
+    ]);
+
+    await renderApp();
+    await clickFirstRecord(/防御 D1/);
+    fireEvent.click(verifyButton());
+
+    await screen.findByText("此记录与当前同版本规则重算一致");
+    expect(verifyRunMock).toHaveBeenCalledTimes(1);
+    expect(verifyRunMock).toHaveBeenCalledWith("rec-1");
+  });
+
+  it("result-mismatch：显示快照不一致与差异摘要，旧快照仍完整可读", async () => {
+    listRunsMock.mockResolvedValue([
+      makeSummary("rec-1", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0)
+    ]);
+    verifyRunMock.mockResolvedValue({
+      ...matchResponse,
+      status: "result-mismatch",
+      differences: ["告警数量不一致：快照 0 条 · 重算 2 条"]
+    });
+
+    await renderApp();
+    await clickFirstRecord(/防御 D1/);
+    fireEvent.click(verifyButton());
+
+    await screen.findByText("当前重算结果与快照不一致");
+    expect(
+      screen.getByText("告警数量不一致：快照 0 条 · 重算 2 条")
+    ).toBeInTheDocument();
+    // 旧快照仍可读：原始解释与事件回放都还在
+    expect(
+      screen.getByText("路径 A 在 A3 被 D1 阻断，路径 B 仍到达。")
+    ).toBeInTheDocument();
+    // 不得表述为「旧记录错误」
+    expect(screen.queryByText(/旧记录错误/)).not.toBeInTheDocument();
+  });
+
+  it("version-mismatch：显示记录版本与当前版本，并明确未重算", async () => {
+    listRunsMock.mockResolvedValue([
+      makeSummary("rec-old", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0)
+    ]);
+    getRunMock.mockResolvedValue(makeRecord("rec-old", 999));
+    verifyRunMock.mockResolvedValue({
+      ...matchResponse,
+      status: "version-mismatch",
+      recordScenarioVersion: 999,
+      currentScenarioVersion: 1
+    });
+
+    await renderApp();
+    await clickFirstRecord(/防御 D1/);
+    fireEvent.click(verifyButton());
+
+    await screen.findByText(/记录版本 v999 · 当前版本 v1/);
+    expect(screen.getByText("版本不一致，未重算。")).toBeInTheDocument();
+  });
+
+  it("连续点击核对只发一次请求", async () => {
+    listRunsMock.mockResolvedValue([
+      makeSummary("rec-1", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0)
+    ]);
+
+    let resolveVerify: (value: VerifyRunResponse) => void = () => {};
+    verifyRunMock.mockReturnValue(
+      new Promise<VerifyRunResponse>((resolve) => {
+        resolveVerify = resolve;
+      })
+    );
+
+    await renderApp();
+    await clickFirstRecord(/防御 D1/);
+
+    fireEvent.click(verifyButton());
+    fireEvent.click(verifyButton());
+    fireEvent.click(verifyButton());
+
+    await waitFor(() => expect(verifyRunMock).toHaveBeenCalledTimes(1));
+
+    resolveVerify(matchResponse);
+    await screen.findByText("此记录与当前同版本规则重算一致");
+  });
+
+  it("切换记录时，旧核对响应不得挂到新记录上", async () => {
+    const summaries = [
+      makeSummary("rec-v1", { O: "open", T: "granted" }, ["D1"], [
+        { pathId: "A", outcome: "blocked", firstBlockedStepId: "A3" },
+        { pathId: "B", outcome: "reached" }
+      ], 0),
+      makeSummary("rec-v2", { O: "closed", T: "granted" }, ["D2"], [
+        { pathId: "A", outcome: "reached" },
+        { pathId: "B", outcome: "blocked", firstBlockedStepId: "B2" }
+      ], 0)
+    ];
+    listRunsMock.mockResolvedValue(summaries);
+    getRunMock.mockImplementation((id: string) => Promise.resolve(makeRecord(id)));
+
+    let resolveOldVerify: (value: VerifyRunResponse) => void = () => {};
+    verifyRunMock.mockReturnValueOnce(
+      new Promise<VerifyRunResponse>((resolve) => {
+        resolveOldVerify = resolve;
+      })
+    );
+
+    await renderApp();
+    await clickFirstRecord(/防御 D1/);
+    fireEvent.click(verifyButton());
+    await waitFor(() => expect(verifyRunMock).toHaveBeenCalledTimes(1));
+    expect(verifyRunMock).toHaveBeenCalledWith("rec-v1");
+
+    // 切到第二条记录（旧核对仍在途）
+    await clickFirstRecord(/防御 D2/);
+    await waitFor(() => expect(getRunMock).toHaveBeenCalledTimes(2));
+
+    resolveOldVerify({
+      ...matchResponse,
+      status: "result-mismatch",
+      differences: ["路径结论不一致"]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    // 旧响应被丢弃：新记录不显示旧核对结果
+    expect(
+      screen.queryByText("当前重算结果与快照不一致")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("正在核对…")).not.toBeInTheDocument();
+
+    // 新记录可以独立发起自己的核对
+    verifyRunMock.mockResolvedValue(matchResponse);
+    fireEvent.click(verifyButton());
+    await screen.findByText("此记录与当前同版本规则重算一致");
+    expect(verifyRunMock).toHaveBeenLastCalledWith("rec-v2");
   });
 });

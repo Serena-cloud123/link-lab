@@ -14,7 +14,8 @@ import type {
   RunSummary,
   SaveLearningRequest,
   Scenario,
-  TValue
+  TValue,
+  VerifyRunResponse
 } from "@link-lab/contracts";
 import {
   fetchScenario,
@@ -24,7 +25,8 @@ import {
   listRuns,
   postEvaluation,
   saveLearning,
-  saveRun
+  saveRun,
+  verifyRun
 } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
@@ -93,6 +95,12 @@ type SelectedLearningState =
   | { status: "none" }
   | { status: "error"; message: string }
   | { status: "done"; record: LearningRecord };
+
+type VerifyState =
+  | { status: "idle" }
+  | { status: "verifying" }
+  | { status: "done"; result: VerifyRunResponse }
+  | { status: "error"; message: string };
 
 const EXPLANATION_SOURCE_LABELS: Record<RunRecord["explanationSource"], string> = {
   template: "规则模板"
@@ -163,6 +171,9 @@ export default function App() {
   const quizTokenRef = useRef(0);
   const [selectedLearning, setSelectedLearning] =
     useState<SelectedLearningState>({ status: "idle" });
+  /** 显式版本核对状态；每次切换记录重置，在途响应按 selectedFetchTokenRef 丢弃。 */
+  const [verifyState, setVerifyState] = useState<VerifyState>({ status: "idle" });
+  const verifyInFlightRef = useRef(false);
 
   /**
    * 动效开关初始值：
@@ -516,6 +527,9 @@ export default function App() {
     setSelectedPlaying(false);
     setSelectedRunEpoch((e) => e + 1);
     setSelectedLearning({ status: "loading" });
+    // 切换记录时作废旧核对结果与在途标记
+    verifyInFlightRef.current = false;
+    setVerifyState({ status: "idle" });
 
     try {
       const record = await getRun(id);
@@ -561,6 +575,32 @@ export default function App() {
       if (token !== selectedFetchTokenRef.current) return;
       if (!mountedRef.current) return;
       setSelectedLearning({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  /* ---------- 显式版本核对 ---------- */
+
+  async function handleVerifyRecord() {
+    if (selectedRecord === null) return;
+    // 连续点击只发一次
+    if (verifyInFlightRef.current) return;
+    verifyInFlightRef.current = true;
+    // 绑定当前选中记录；切换记录后 token 变化，旧响应不得挂到新记录
+    const token = selectedFetchTokenRef.current;
+    setVerifyState({ status: "verifying" });
+    try {
+      const result = await verifyRun(selectedRecord.id);
+      if (token !== selectedFetchTokenRef.current) return;
+      if (!mountedRef.current) return;
+      setVerifyState({ status: "done", result });
+    } catch (error) {
+      if (token !== selectedFetchTokenRef.current) return;
+      if (!mountedRef.current) return;
+      setVerifyState({ status: "error", message: errorMessage(error) });
+    } finally {
+      if (token === selectedFetchTokenRef.current) {
+        verifyInFlightRef.current = false;
+      }
     }
   }
 
@@ -1001,6 +1041,58 @@ export default function App() {
 
         <section className="panel records-playback-panel" aria-label="历史回放">
           <h2>回放视图</h2>
+          {selectedRecord !== null ? (
+            <div className="record-verify" aria-label="版本核对">
+              <button
+                type="button"
+                className="verify-button"
+                disabled={verifyState.status === "verifying"}
+                onClick={() => void handleVerifyRecord()}
+              >
+                核对当前版本
+              </button>
+              {verifyState.status === "verifying" ? (
+                <p className="hint">正在核对…</p>
+              ) : null}
+              {verifyState.status === "error" ? (
+                <p className="notice error" role="alert">
+                  核对请求失败：{verifyState.message}
+                </p>
+              ) : null}
+              {verifyState.status === "done" ? (
+                <div
+                  className={`verify-result verify-${verifyState.result.status}`}
+                  role="status"
+                >
+                  {verifyState.result.status === "match" ? (
+                    <p>此记录与当前同版本规则重算一致</p>
+                  ) : verifyState.result.status === "result-mismatch" ? (
+                    <>
+                      <p>当前重算结果与快照不一致</p>
+                      <p className="hint">
+                        旧快照仍完整可读；本次核对未修改库中记录。
+                      </p>
+                      {verifyState.result.differences ? (
+                        <ul className="verify-differences">
+                          {verifyState.result.differences.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>
+                      <p>
+                        记录版本 v{verifyState.result.recordScenarioVersion} · 当前版本
+                        v{verifyState.result.currentScenarioVersion}
+                      </p>
+                      <p className="hint">版本不一致，未重算。</p>
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {selectedRecord === null ? (
             <p className="notice">点击左侧一条历史运行以回放其事件。</p>
           ) : !scenarioReady ? (
