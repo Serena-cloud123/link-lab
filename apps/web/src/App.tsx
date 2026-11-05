@@ -689,6 +689,11 @@ export default function App() {
     return `预设 ${question.config.presetId} · O ${oValueText[question.config.conditions.O]} · T ${tValueText[question.config.conditions.T]} · ${defenseText}`;
   }
 
+  /** 显示编号：由选项数组下标推导 A/B/C/D，与 option.id 无关。 */
+  function optionLetter(index: number): string {
+    return String.fromCharCode(65 + index);
+  }
+
   function optionTextOf(
     questions: LearningQuestion[],
     questionId: LearningQuestionId,
@@ -696,8 +701,11 @@ export default function App() {
   ): string {
     if (optionId === null) return "未作答";
     const question = questions.find((item) => item.id === questionId);
-    const option = question?.options.find((item) => item.id === optionId);
-    return option ? `${option.id}. ${option.text}` : optionId;
+    if (!question) return optionId;
+    // 通过 id 在选项数组中查位置，再转字母标签
+    const index = question.options.findIndex((item) => item.id === optionId);
+    if (index < 0) return optionId;
+    return `${optionLetter(index)}. ${question.options[index].text}`;
   }
 
   function outcomeText(outcome: PathFinalOutcome): string {
@@ -1393,7 +1401,7 @@ export default function App() {
                           role="radiogroup"
                           aria-label={`${question.id} 选项`}
                         >
-                          {question.options.map((option) => {
+                          {question.options.map((option, index) => {
                             const selected =
                               quizPredictions[question.id] === option.id;
                             return (
@@ -1407,7 +1415,7 @@ export default function App() {
                                   handlePredict(question.id, option.id)
                                 }
                               >
-                                {option.id}. {option.text}
+                                {optionLetter(index)}. {option.text}
                               </button>
                             );
                           })}

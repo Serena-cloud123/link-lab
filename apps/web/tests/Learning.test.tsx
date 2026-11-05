@@ -391,7 +391,7 @@ describe("Day 13 — 三题与学习记录（前端）", () => {
     );
     expect(screen.getAllByText(/回答错误/)).toHaveLength(1);
     expect(
-      screen.getByText(/正确答案：2\. 未被阻断——A\/B 都能到达，并且出现告警/)
+      screen.getByText(/正确答案：C\. 未被阻断——A\/B 都能到达，并且出现告警/)
     ).toBeInTheDocument();
     expect(
       screen.getByText(
