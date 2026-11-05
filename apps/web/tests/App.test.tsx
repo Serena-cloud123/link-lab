@@ -6,15 +6,19 @@ import App from "../src/App";
 vi.mock("../src/api", () => ({
   fetchScenario: vi.fn(),
   postEvaluation: vi.fn(),
-  saveRun: vi.fn()
+  saveRun: vi.fn(),
+  listRuns: vi.fn(),
+  getRun: vi.fn()
 }));
 
-import { fetchScenario, postEvaluation, saveRun } from "../src/api";
+import { fetchScenario, getRun, listRuns, postEvaluation, saveRun } from "../src/api";
 
 type MockFn = ReturnType<typeof vi.fn>;
 const fetchScenarioMock = fetchScenario as unknown as MockFn;
 const postEvaluationMock = postEvaluation as unknown as MockFn;
 const saveRunMock = saveRun as unknown as MockFn;
+const listRunsMock = listRuns as unknown as MockFn;
+const getRunMock = getRun as unknown as MockFn;
 
 const scenarioFixture: Scenario = {
   id: "campus-registration",
@@ -691,15 +695,17 @@ describe("Day 12 显式保存", () => {
     saveRunMock.mockImplementation((input: RunInput) =>
       Promise.resolve(makeSavedRecord(input))
     );
+    listRunsMock.mockResolvedValue([]);
   });
 
-  it("顶部阶段标题更新为 Day 12，学习记录页如实说明保存支持", async () => {
+  it("顶部阶段标题更新为 Day 12，学习记录页显示空状态而非旧占位符", async () => {
     render(<App />);
     await screen.findByText(/Day 12 · 显式保存与规则解释/);
     fireEvent.click(screen.getByRole("button", { name: "学习记录" }));
+    await screen.findByText(/暂无保存的运行/);
     expect(
-      screen.getByText(/已支持在沙盘工作台显式保存一次成功运行/)
-    ).toBeInTheDocument();
+      screen.queryByText(/已支持在沙盘工作台显式保存一次成功运行/)
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/不保存任何运行/)).not.toBeInTheDocument();
   });
 

@@ -1,4 +1,10 @@
-import type { RunInput, RunRecord, RunResult, Scenario } from "@link-lab/contracts";
+import type {
+  RunInput,
+  RunRecord,
+  RunResult,
+  RunSummary,
+  Scenario
+} from "@link-lab/contracts";
 
 async function throwHttpError(response: Response): Promise<never> {
   let detail = "";
@@ -50,6 +56,33 @@ export async function saveRun(input: RunInput): Promise<RunRecord> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input)
     });
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!response.ok) await throwHttpError(response);
+  return (await response.json()) as RunRecord;
+}
+
+export async function listRuns(): Promise<RunSummary[]> {
+  let response: Response;
+  try {
+    response = await fetch("/api/runs");
+  } catch (error) {
+    throw new Error(
+      `无法连接后端：${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!response.ok) await throwHttpError(response);
+  const body = (await response.json()) as { runs: RunSummary[] };
+  return body.runs;
+}
+
+export async function getRun(id: string): Promise<RunRecord> {
+  let response: Response;
+  try {
+    response = await fetch(`/api/runs/${id}`);
   } catch (error) {
     throw new Error(
       `无法连接后端：${error instanceof Error ? error.message : String(error)}`

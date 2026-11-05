@@ -133,3 +133,4 @@ export interface RunResult {
   alertCount: number;
 }
 export type { RunRecord, RunSnapshot, SaveRunResponse } from "./records.js";
+export type { RunSummary, ListRunsResponse } from "./runs.js";

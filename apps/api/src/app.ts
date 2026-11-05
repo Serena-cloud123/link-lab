@@ -128,6 +128,20 @@ export function buildServer(
     }
   );
 
+  app.get("/api/runs", async (request, reply) => {
+    try {
+      const summaries = runStore.listRuns();
+      return { runs: summaries };
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(500).send({
+        statusCode: 500,
+        error: "Internal Server Error",
+        message: "读取运行列表失败"
+      });
+    }
+  });
+
   app.get("/api/runs/:id", async (request, reply) => {
     const { id } = request.params as { id: string };
     try {

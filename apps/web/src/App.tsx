@@ -6,10 +6,11 @@ import type {
   RunInput,
   RunRecord,
   RunResult,
+  RunSummary,
   Scenario,
   TValue
 } from "@link-lab/contracts";
-import { fetchScenario, postEvaluation, saveRun } from "./api";
+import { fetchScenario, getRun, listRuns, postEvaluation, saveRun } from "./api";
 import { ScenarioGraph } from "./components/ScenarioGraph";
 import { RunResultPanel } from "./components/RunResultPanel";
 import { PlaybackBar } from "./components/PlaybackBar";
@@ -52,6 +53,12 @@ type SaveState =
   | { status: "saving" }
   | { status: "saved"; record: RunRecord; runVersion: number }
   | { status: "error"; message: string; runVersion: number };
+
+type RecordsListState =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "error"; message: string }
+  | { status: "done"; summaries: RunSummary[] };
 
 const EXPLANATION_SOURCE_LABELS: Record<RunRecord["explanationSource"], string> = {
   template: "规则模板"
@@ -98,6 +105,17 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [runEpoch, setRunEpoch] = useState(0);
   const [saveState, setSaveState] = useState<SaveState>({ status: "idle" });
+
+  /* ---------- 记录页独立状态（与工作台隔离） ---------- */
+  const [recordsList, setRecordsList] = useState<RecordsListState>({
+    status: "idle"
+  });
+  const [selectedRecord, setSelectedRecord] = useState<RunRecord | null>(null);
+  const [selectedEventIndex, setSelectedEventIndex] = useState(0);
+  const [selectedPlaying, setSelectedPlaying] = useState(false);
+  const [selectedRunEpoch, setSelectedRunEpoch] = useState(0);
+  /** 每次切换记录递增，让在途 GET 详情响应被丢弃。 */
+  const selectedFetchTokenRef = useRef(0);
 
   /**
    * 动效开关初始值：
@@ -423,6 +441,123 @@ export default function App() {
     void run(conditionsRef.current, defensesRef.current);
   }
 
+  /* ---------- 记录页：列表加载与记录选择 ---------- */
+
+  /** 加载历史列表。只在 page === "records" 时调用。 */
+  async function fetchRecordsList() {
+    setRecordsList({ status: "loading" });
+    try {
+      const summaries = await listRuns();
+      if (!mountedRef.current) return;
+      setRecordsList({ status: "done", summaries });
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setRecordsList({ status: "error", message: errorMessage(error) });
+    }
+  }
+
+  /** 点击历史列表中的一条 → 拉详情，独立于工作台。 */
+  async function handleSelectRecord(id: string) {
+    // 取消上一条在途详情请求
+    const token = ++selectedFetchTokenRef.current;
+    setSelectedRecord(null);
+    setSelectedEventIndex(0);
+    setSelectedPlaying(false);
+    setSelectedRunEpoch((e) => e + 1);
+
+    try {
+      const record = await getRun(id);
+      if (token !== selectedFetchTokenRef.current) return; // 已切到下一条
+      if (!mountedRef.current) return;
+      setSelectedRecord(record);
+    } catch (error) {
+      if (token !== selectedFetchTokenRef.current) return;
+      if (!mountedRef.current) return;
+      // 详情加载失败时清除选中
+      setSelectedRecord(null);
+      // 把错误塞进 recordsList 状态的方式太绕，这里只抛给 UI 用 alert 处理
+      // 或干脆静默（用户再点一次即可）
+      console.error("加载运行详情失败：", error);
+    }
+  }
+
+  /**
+   * page 切换 effect：
+   * - 进入 records → 加载列表 + 暂停工作台播放
+   * - 离开 records → 清除选中 + 递增 runEpoch 让旧播放定时器自毁
+   */
+  useEffect(() => {
+    if (page === "records") {
+      setPlaying(false); // 暂停工作台播放
+      void fetchRecordsList();
+    } else {
+      // 离开 records 页：清理独立回放上下文，不污染工作台状态
+      setSelectedRecord(null);
+      setSelectedPlaying(false);
+      setSelectedRunEpoch((e) => e + 1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  /** 独立的 selected playing 定时器（与工作台的 playing/eventIndex 完全隔离）。 */
+  useEffect(() => {
+    if (!selectedPlaying || !selectedRecord) return;
+    const events = selectedRecord.result.events;
+    if (selectedEventIndex >= events.length - 1) {
+      setSelectedPlaying(false);
+      return;
+    }
+    const id = window.setInterval(() => {
+      setSelectedEventIndex((prev) => {
+        if (prev >= events.length - 1) {
+          window.clearInterval(id);
+          setSelectedPlaying(false);
+          return prev;
+        }
+        return prev + 1;
+      });
+    }, 800);
+    return () => window.clearInterval(id);
+  }, [selectedPlaying, selectedEventIndex, selectedRecord, selectedRunEpoch]);
+
+  /* ---------- 记录页播放控制（独立函数，复用 PlaybackBar） ---------- */
+
+  function selectedNodeLabel(id: string, recordVersionMatches: boolean): string {
+    if (!recordVersionMatches) {
+      // 版本不一致：不查当前场景的中文标签，直接返回 nodeId
+      return id;
+    }
+    return scenarioRef.current?.nodes.find((n) => n.id === id)?.label ?? id;
+  }
+
+  function selectedHandleJump(index: number) {
+    setSelectedPlaying(false);
+    setSelectedEventIndex(index);
+  }
+  function selectedHandleNext() {
+    setSelectedPlaying(false);
+    if (!selectedRecord) return;
+    const count = selectedRecord.result.events.length;
+    setSelectedEventIndex((prev) =>
+      count === 0 ? 0 : Math.min(prev + 1, count - 1)
+    );
+  }
+  function selectedHandlePrev() {
+    setSelectedPlaying(false);
+    setSelectedEventIndex((prev) => Math.max(prev - 1, 0));
+  }
+  function selectedHandlePlayPause() {
+    if (!selectedRecord) return;
+    const count = selectedRecord.result.events.length;
+    if (count === 0) return;
+    if (selectedEventIndex >= count - 1) {
+      setSelectedEventIndex(0);
+      setSelectedPlaying(true);
+      return;
+    }
+    setSelectedPlaying((prev) => !prev);
+  }
+
   /**
    * 显式保存当前成功运行。只发送该次 runState.input 快照；
    * 响应返回时若 token/runVersion 已变（新运行、切预设、场景重载），静默丢弃。
@@ -552,13 +687,134 @@ export default function App() {
 
   let content: ReactNode;
   if (page === "records") {
+    const scenarioReady = scenarioState.status === "ready";
+    const currentScenario = scenarioState.status === "ready" ? scenarioState.scenario : null;
+    const summaries = recordsList.status === "done" ? recordsList.summaries : [];
+    const hasRecords = summaries.length > 0;
+
+    // 版本匹配判定
+    const versionMatches =
+      selectedRecord !== null &&
+      currentScenario !== null &&
+      selectedRecord.scenarioId === currentScenario.id &&
+      selectedRecord.scenarioVersion === currentScenario.version;
+
+    const selectedEvents = selectedRecord?.result.events ?? [];
+    const selectedEventsCount = selectedEvents.length;
+    const selectedPlaybackView =
+      selectedRecord !== null ? derivePlaybackView(selectedRecord.result, selectedEventIndex) : null;
+
     content = (
-      <section className="panel records" aria-labelledby="records-title">
-        <h2 id="records-title">学习记录</h2>
-        <p>已支持在沙盘工作台显式保存一次成功运行；列表与回放将在下一阶段接入。</p>
-        <p className="hint">
-          后续开放后，这里会列出你保存的运行，可逐条回放并核对当时的事件与条件。
-        </p>
+      <section className="records-grid" aria-label="学习记录">
+        <aside className="panel records-list-panel" aria-label="历史列表">
+          <h2>学习记录</h2>
+          {recordsList.status === "loading" ? (
+            <p className="notice">正在加载历史列表…</p>
+          ) : recordsList.status === "error" ? (
+            <div className="notice error" role="alert">
+              <p>加载失败：{recordsList.message}</p>
+              <button type="button" onClick={() => void fetchRecordsList()}>
+                重试
+              </button>
+            </div>
+          ) : !hasRecords ? (
+            <div className="records-empty">
+              <p>暂无保存的运行。</p>
+              <p className="hint">去沙盘工作台运行一次配置并点击「保存此配置的推演」，之后这里会列出你的学习记录。</p>
+            </div>
+          ) : (
+            <ul className="records-list" role="listbox" aria-label="历史运行列表">
+              {summaries.map((sum) => {
+                const isSelected = selectedRecord?.id === sum.id;
+                return (
+                  <li key={sum.id}>
+                    <button
+                      type="button"
+                      className={`record-item ${isSelected ? "selected" : ""}`}
+                      onClick={() => void handleSelectRecord(sum.id)}
+                      aria-current={isSelected ? "true" : undefined}
+                    >
+                      <span className="record-time">{sum.savedAt}</span>
+                      <span className="record-config">
+                        O {oValueText[sum.conditions.O]} · T {tValueText[sum.conditions.T]}
+                        {sum.defenses.length > 0
+                          ? ` · 防御 ${sum.defenses.join("、")}`
+                          : " · 无防御"}
+                      </span>
+                      <span className="record-result">
+                        A {sum.pathResults.find((p) => p.pathId === "A")?.outcome}
+                        {" · "}
+                        B {sum.pathResults.find((p) => p.pathId === "B")?.outcome}
+                        {sum.alertCount > 0 ? ` · ${sum.alertCount} 告警` : ""}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </aside>
+
+        <section className="panel records-playback-panel" aria-label="历史回放">
+          <h2>回放视图</h2>
+          {selectedRecord === null ? (
+            <p className="notice">点击左侧一条历史运行以回放其事件。</p>
+          ) : !scenarioReady ? (
+            <p className="notice">场景尚未加载完成，无法回放。</p>
+          ) : !versionMatches ? (
+            <>
+              <div className="version-mismatch-warning" role="alert">
+                <p>⚠️ 当前场景版本与该记录的场景版本不一致（记录 v{selectedRecord.scenarioVersion} · 当前 v{currentScenario!.version}）。</p>
+                <p className="hint">仅显示事件文字回放，无法用当前场景画布还原。节点显示使用记录中的原始 ID。</p>
+              </div>
+              <CurrentEventPanel
+                result={selectedRecord.result}
+                eventIndex={selectedEventIndex}
+                nodeLabel={(id) => selectedNodeLabel(id, false)}
+              />
+              <PlaybackBar
+                eventsCount={selectedEventsCount}
+                eventIndex={selectedEventIndex}
+                playing={selectedPlaying}
+                animationsEnabled={animationsEnabled}
+                onAnimationsToggle={toggleAnimations}
+                onJump={selectedHandleJump}
+                onNext={selectedHandleNext}
+                onPrev={selectedHandlePrev}
+                onPlayPause={selectedHandlePlayPause}
+              />
+            </>
+          ) : (
+            <>
+              <ScenarioGraph
+                scenario={currentScenario!}
+                view={selectedPlaybackView}
+                animationsEnabled={animationsEnabled}
+                runEpoch={selectedRunEpoch}
+              />
+              <CurrentEventPanel
+                result={selectedRecord.result}
+                eventIndex={selectedEventIndex}
+                nodeLabel={(id) => selectedNodeLabel(id, true)}
+              />
+              <PlaybackBar
+                eventsCount={selectedEventsCount}
+                eventIndex={selectedEventIndex}
+                playing={selectedPlaying}
+                animationsEnabled={animationsEnabled}
+                onAnimationsToggle={toggleAnimations}
+                onJump={selectedHandleJump}
+                onNext={selectedHandleNext}
+                onPrev={selectedHandlePrev}
+                onPlayPause={selectedHandlePlayPause}
+              />
+              <div className="record-explanation">
+                <h3>原始解释（{explanationSourceLabel(selectedRecord.explanationSource)}）</h3>
+                <p>{selectedRecord.explanation}</p>
+              </div>
+            </>
+          )}
+        </section>
       </section>
     );
   } else if (scenarioState.status === "loading") {

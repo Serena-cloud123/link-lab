@@ -2,7 +2,12 @@ import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
-import type { RunInput, RunRecord, RunResult } from "@link-lab/contracts";
+import type {
+  RunInput,
+  RunRecord,
+  RunResult,
+  RunSummary
+} from "@link-lab/contracts";
 
 const RUNS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS runs (
@@ -47,6 +52,18 @@ const SELECT_RUN_SQL = `
   WHERE id = ?
 `;
 
+const LIST_RUNS_SQL = `
+  SELECT
+    id,
+    saved_at,
+    scenario_id,
+    scenario_version,
+    input_json,
+    result_json
+  FROM runs
+  ORDER BY saved_at DESC, rowid DESC
+`;
+
 /**
  * 默认库位置由 import.meta.url 推导：
  * apps/api/src/db.ts 与 apps/api/dist/db.js 向上三级都是仓库根，
@@ -79,6 +96,7 @@ export function openRunDatabase(dbPath: string): DatabaseSync {
 export interface RunStore {
   insert(record: RunRecord): void;
   findById(id: string): RunRecord | undefined;
+  listRuns(): RunSummary[];
 }
 
 interface RunRow {
@@ -107,9 +125,35 @@ function parseRunRow(row: RunRow): RunRecord {
   };
 }
 
+interface RunSummaryRow {
+  id: string;
+  saved_at: string;
+  scenario_id: string;
+  scenario_version: number | bigint;
+  input_json: string;
+  result_json: string;
+}
+
+function parseSummaryRow(row: RunSummaryRow): RunSummary {
+  const input = JSON.parse(row.input_json) as RunInput;
+  const result = JSON.parse(row.result_json) as RunResult;
+  return {
+    id: row.id,
+    savedAt: row.saved_at,
+    scenarioId: row.scenario_id,
+    scenarioVersion: Number(row.scenario_version),
+    conditions: input.conditions,
+    presetId: input.presetId,
+    defenses: input.defenses,
+    pathResults: result.pathResults,
+    alertCount: result.alertCount
+  };
+}
+
 export function createRunStore(db: DatabaseSync): RunStore {
   const insertStatement = db.prepare(INSERT_RUN_SQL);
   const selectStatement = db.prepare(SELECT_RUN_SQL);
+  const listStatement = db.prepare(LIST_RUNS_SQL);
 
   return {
     insert(record: RunRecord): void {
@@ -128,6 +172,10 @@ export function createRunStore(db: DatabaseSync): RunStore {
     findById(id: string): RunRecord | undefined {
       const row = selectStatement.get(id) as RunRow | undefined;
       return row ? parseRunRow(row) : undefined;
+    },
+    listRuns(): RunSummary[] {
+      const rows = listStatement.all() as unknown as RunSummaryRow[];
+      return rows.map(parseSummaryRow);
     }
   };
 }

@@ -1060,12 +1060,132 @@ h3 {
   opacity: 0 !important;
 }
 
+/* ==========================================================================
+   Day 13 — 历史列表与回放
+   ========================================================================== */
+
+.records-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.records-list-panel {
+  max-height: calc(100vh - 220px);
+  overflow: auto;
+}
+
+.records-empty {
+  padding: 16px 0;
+  color: #97a8b9;
+}
+
+.records-empty p {
+  margin: 0 0 8px;
+}
+
+.records-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.record-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid #2c3b49;
+  border-radius: 10px;
+  background: #111b24;
+  color: #c7d2dc;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  font-family: inherit;
+}
+
+.record-item:hover {
+  border-color: #3d5568;
+  background: #182834;
+}
+
+.record-item.selected {
+  border-color: #7fc8b5;
+  background: #182834;
+  color: #e7edf3;
+}
+
+.record-time {
+  display: block;
+  font-size: 0.78rem;
+  color: #7fc8b5;
+  letter-spacing: 0.03em;
+  margin-bottom: 4px;
+}
+
+.record-config {
+  display: block;
+  font-size: 0.88rem;
+  margin-bottom: 3px;
+  color: #b6c3cf;
+}
+
+.record-result {
+  display: block;
+  font-size: 0.82rem;
+  color: #8fa3b7;
+}
+
+.records-playback-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.version-mismatch-warning {
+  padding: 12px 14px;
+  border: 1px solid #c29a4b;
+  border-radius: 10px;
+  background: #2a2214;
+  color: #e6c788;
+}
+
+.version-mismatch-warning p {
+  margin: 0 0 4px;
+}
+
+.record-explanation {
+  padding: 12px 14px;
+  border: 1px solid #2c3b49;
+  border-radius: 10px;
+  background: #111b24;
+  font-size: 0.9rem;
+  color: #b6c3cf;
+}
+
+.record-explanation h3 {
+  margin: 0 0 8px;
+}
+
+.record-explanation p {
+  margin: 0;
+  line-height: 1.6;
+}
+
 @media (max-width: 1023px) {
   .shell {
     padding-top: 24px;
   }
 
   .workbench-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .records-grid {
     grid-template-columns: 1fr;
   }
 
