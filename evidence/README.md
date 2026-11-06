@@ -10,6 +10,8 @@
 | `iterations/01_条件与引擎与32条核对.md` | 链 01 的整理稿 | 索引与取舍说明，不替代原始文件 |
 | `iterations/02_原始对话_Day7-11.md` | AI 工具整包导出的原始对话 | 原始文件，不得编辑 |
 | `iterations/02_两档滑块与规则流线.md` | 链 02 的整理稿 | 索引与取舍说明，不替代原始文件 |
+| `iterations/03_原始对话_Day12-13.md` | AI 工具整包导出的原始对话（覆盖 Day 12—13） | 原始文件，不得编辑 |
+| `iterations/03_历史回放与版本核对.md` | 链 03 的整理稿 | 索引与取舍说明，不替代原始文件 |
 | `docs/Day*_*.md` | 每日实施记录，含 AI 方案要点、我的修正、验证输出 | 过程记录 |
 | `docs/screenshots/` | 应用界面截图，命名 `day{日}-{内容}.png` | 产品证据 |
 
@@ -21,7 +23,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | 条件与引擎及 32 条自动核对 | Day 2—6 | 10-26 至 10-30 | 155f710、fb8e851、4717f13、91a7882、d98faa3、610a913、8dea6f2 | `iterations/01_条件与引擎与32条核对.md` | 已封存 |
 | 02 | 交互配置、同条件对比与规则状态可视化 | Day 7—11 | 10-31 至 11-04 | cf313aa、ded7996、ac21c23、8b7a3db、6f89f95、a23b073 | `iterations/02_两档滑块与规则流线.md` | 已封存 |
-| 03 | 模板解释落库、保存、回放与版本核对 | Day 12—13 | — | — | 待封存 | 未开始 |
+| 03 | 运行保存、历史回放与版本核对 | Day 12—13 | 11-04 至 11-06 | 272fa3e、d0e3a5f、401a074、15b2297、5cb567e、ba19305、5ce5e04、7e6c075、28f2373 | `iterations/03_历史回放与版本核对.md` | 已封存 |
 
 ## 链外记录
 
@@ -34,18 +36,20 @@
 | Day 9 | 双条件滑块与防御配置 | `docs/Day9_双条件滑块与防御配置.md`、`docs/screenshots/day9-*.png` | 链 02 中段 |
 | Day 10 | 同条件基线与干预对比 | `docs/Day10_同条件基线与干预对比.md`、`docs/screenshots/day10-*.png` | 链 02 中段 |
 | Day 11 | 事件播放与规则状态可视化 | `docs/Day11_事件播放与规则状态可视化.md` | 链 02 末段 |
+| Day 12 | 运行保存与模板解释 | `docs/Day12_运行保存与模板解释.md` | 链 03 前段 |
+| Day 13 | 历史回放与版本核对 | `docs/Day13_历史回放与版本核对.md` | 链 03 后段 |
 
 ## 说明
 
-- 链 01 的原始证据是 Trae 的整包导出文件 `iterations/01_原始对话_Day2-6.md`（约 127 KB，未删改）。整理稿只做索引与取舍说明，不替代原始文件。
-- 链 02 的原始证据是 `iterations/02_原始对话_Day7-11.md`（约 198 KB，未删改），整理稿为 `iterations/02_两档滑块与规则流线.md`。
-- 链 03 在真实开始前不建占位文件，避免出现未经发生的内容；封存日再整理。
+- 链 01 的原始证据是 Trae 的整包导出文件 `iterations/01_原始对话_Day2-6.md`（约 146 KB，未删改）。整理稿只做索引与取舍说明，不替代原始文件。
+- 链 02 的原始证据是 `iterations/02_原始对话_Day7-11.md`（约 244 KB，未删改），整理稿为 `iterations/02_两档滑块与规则流线.md`。
+- 链 03 的原始证据是 `iterations/03_原始对话_Day12-13.md`（约 456 KB，未删改），一份导出覆盖 Day 12—13；整理稿为 `iterations/03_历史回放与版本核对.md`。
 - 界面截图统一放 `docs/screenshots/`。
 
 ## 冻结范围口径
 
 「冻结文件全程未改」指的是：`packages/engine/src/**`、`scenarios/campus-registration/v1.json`、`packages/engine/tests/expected-runs.csv`，从 Day 1 至当前提交始终未变。
 
-`packages/contracts/src/index.ts` 在 Day 12 有一次纯追加：新增 `packages/contracts/src/records.ts` 承载运行快照类型，`index.ts` 末尾只追加一行 re-export。该次改动 `git diff --numstat` 为 `1 0`，删除行数为 0，未修改任何既有类型、字段或枚举值。详见 `docs/Day12_运行保存与模板解释.md`。
+`packages/contracts/src/index.ts` 在 Day 12 有一次纯追加：新增 `packages/contracts/src/records.ts` 承载运行快照类型，`index.ts` 末尾只追加一行 re-export；Day 13 又追加三次：新增 `runs.ts`（历史列表摘要）、`learning.ts`（学习记录与三题）、`verify.ts`（核对响应），`index.ts` 各追加一行导出。四次改动 `git diff --numstat` 均为 `1 0`，删除行数均为 0，未修改任何既有类型、字段或枚举值。详见 `docs/Day12_运行保存与模板解释.md` 与 `docs/Day13_历史回放与版本核对.md`。
 
 `apps/api/src/app.ts` 自 Day 12 起属正常开发范围（新增路由接线），不再列入每日冻结检查。每日冻结检查命令为：
