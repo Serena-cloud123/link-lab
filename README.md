@@ -14,6 +14,18 @@ Day 12：显式保存与规则模板解释。工作台的「运行结果」面�
 2. 区分“检测到请求”和“阻断了请求”。
 3. 解释阻断一条路径后，为什么仍可能存在另一条路径。
 
+## 五分钟体验路线
+
+1. 场景介绍页 → 进入沙盘工作台 → 选预设 A
+2. 防御全关，运行一次无防御基线
+3. 播放下标 0—7，逐步读每一步的条件检查理由
+4. 开 D1 重跑，看路径 A 在哪一步被拒、残余路径引用哪些条件
+5. 对照基线与干预的差异
+6. **先保存本次运行，再答三题并提交学习记录**——答题区需要一条已保存的运行才能提交
+7. 学习记录页打开该记录回放，再点「核对当前版本」
+
+回放只读库中旧快照，不重新推演；核对是在版本一致时主动重算，两者不是同一个动作。
+
 ## 模型边界
 
 只建模一个虚构校园报名场景、两条预设路径、三种防御和两个初始条件。推演结果只适用于这些已建模路径，不代表真实系统的安全结论。不执行真实攻击。本工具是入门引路，不替代动手实操。
@@ -35,7 +47,7 @@ Day 12：显式保存与规则模板解释。工作台的「运行结果」面�
 环境：Node.js v24.21.0，npm 11.19.0，Git 2.53.0.windows.2。使用 Node 内置 `node:sqlite`，无 ORM。数据库默认落在 `apps/api/data/link-lab.db`，目录自动创建，`src` 启动与 `dist` 启动指向同一文件；可用 `DATABASE_PATH` 覆盖（相对路径以仓库根为基准）。
 
 ```powershell
-npm install
+npm ci
 npm run build       # 首次使用，或修改过 contracts / engine 之后必须先执行
 npm run dev:api     # http://127.0.0.1:3001
 npm run dev:web     # http://127.0.0.1:5173
@@ -43,9 +55,20 @@ npm run typecheck
 npm run test
 ```
 
+`npm ci` 按 `package-lock.json` 安装锁定版本，与提交时的依赖树一致。需要更新依赖时才用 `npm install`，那不属于复现流程。
+
+
 注意：`npm run dev:api` 会先构建 contracts 与 engine。**不要直接进入 `apps/api` 目录跑 `npm run dev`**，此时 engine 可能未构建，会因找不到 `@link-lab/engine` 的 dist 入口而失败。
 
 前端通过 Vite 开发代理把 `/api` 转发到 `http://127.0.0.1:3001`，使用工作台时需同时运行 `dev:api` 与 `dev:web`。
+
+### 干净目录复现（Day 14 实测）
+
+- 克隆 + `npm ci` + `npm run build`：约 2.1 分钟（含依赖下载，实测速率约 23 KiB/s）
+- 依赖就绪到浏览器走完七步：约 6.1 分钟
+- 克隆后 `apps/api/data/link-lab.db` 不存在，首次启动自动创建空库
+- 干净目录的测试结果与主仓库一致：web 63、api 48、engine 23，合计 134 项通过
+
 
 构建产物模式（运行 `dist` 里的入口）：
 
@@ -89,7 +112,7 @@ $saved = Invoke-RestMethod -Method Post `
 
 $saved.id
 $saved.explanation
-
+```
 
 预期：`pathResults` 为 A `blocked`、B `reached`，`alertCount` 为 2，`events` 共 8 条。
 
