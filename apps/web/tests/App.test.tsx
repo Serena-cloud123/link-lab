@@ -687,10 +687,65 @@ describe("App 工作台交互", () => {
       await screen.findByText("进入沙盘工作台");
       fireEvent.click(screen.getByText("进入沙盘工作台"));
       await screen.findByLabelText("运行配置");
-      // 动效默认关闭时 aria-label 为 "开启动画"
+      // 系统 reduce 时动效强制关闭：按钮禁用，aria-label 说明原因
+      const animToggle = screen.getByRole("button", {
+        name: "系统已开启减少动画效果，动效强制关闭"
+      });
+      expect(animToggle).toBeInTheDocument();
+      expect(animToggle).toBeDisabled();
+    } finally {
+      window.matchMedia = origMatchMedia;
+      try {
+        window.localStorage.removeItem("animationsEnabled");
+      } catch {
+        // 忽略
+      }
+    }
+  });
+
+  it("系统 reduce 时即使 localStorage 存 true 也关闭动效，且静态告警徽标仍在", async () => {
+    // 复现缺陷：localStorage 存 "true"，但系统要求 reduce。
+    // 旧逻辑命中 localStorage 直接返回 true，导致动画照常播放。
+    try {
+      window.localStorage.setItem("animationsEnabled", "true");
+    } catch {
+      // 隐私模式忽略
+    }
+    const origMatchMedia = window.matchMedia;
+    const mockMedia = {
+      matches: true,
+      media: "(prefers-reduced-motion: reduce)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      onchange: null
+    } as unknown as MediaQueryList;
+    window.matchMedia = vi.fn().mockReturnValue(mockMedia);
+    // D3 开启时 A2 事件带 alert，N3 节点会出现静态告警徽标
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    try {
+      await renderWorkbench();
+      fireEvent.click(getDefenseButton("D3"));
+      await screen.findByText(/当前事件：/);
+      fireEvent.click(screen.getByRole("button", { name: "跳转到事件 1" }));
+      await waitFor(() =>
+        expect(screen.getByText(/当前事件：路径 A · A2/)).toBeInTheDocument()
+      );
+
+      // 断言 1：图容器不含 animations-enabled 类——系统偏好胜出
+      const graphContainer = document.querySelector(".graph-container");
+      expect(graphContainer).not.toBeNull();
       expect(
-        screen.getByRole("button", { name: "开启动画" })
-      ).toBeInTheDocument();
+        graphContainer?.classList.contains("animations-enabled")
+      ).toBe(false);
+
+      // 断言 2：静态告警徽标仍在 DOM 中——防止一刀切抹掉静态信息
+      expect(
+        document.querySelector(".graph-node-alert-badge")
+      ).not.toBeNull();
     } finally {
       window.matchMedia = origMatchMedia;
       try {

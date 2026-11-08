@@ -1306,3 +1306,16 @@ h3 {
     overflow: visible;
   }
 }
+
+/* ==========================================================================
+   prefers-reduced-motion 兜底（不依赖 JS 的 .animations-enabled 类）
+   仅处理纯运动 overlay 层；静态边色、告警徽标、到达徽标、文字、条件理由不动。
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .flow-overlay-path,
+  .alert-pulse-overlay,
+  .arrived-pulse-overlay::before {
+    animation: none !important;
+    opacity: 0 !important;
+  }
+}

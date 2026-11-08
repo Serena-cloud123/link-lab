@@ -124,6 +124,36 @@ function serializeConfig(conditions: Conditions, defenses: DefenseId[]): string 
 
 const DEFENSE_ORDER: DefenseId[] = ["D1", "D2", "D3"];
 
+/**
+ * 读取系统减少动态效果偏好。matchMedia 不可用时保守返回 false（不强制关闭）。
+ */
+function systemPrefersReducedMotion(): boolean {
+  try {
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 动效开关的唯一真值解析：
+ *   1. 系统偏好无条件优先——要求 reduce 时一律 false，忽略 localStorage。
+ *   2. 系统不 reduce 时才看 localStorage："true"/"false" 按值，缺省默认 true。
+ * useState 初始化器与 matchMedia change 回调共用此函数，保证逻辑一致。
+ */
+function resolveAnimationsEnabled(): boolean {
+  if (systemPrefersReducedMotion()) return false;
+  let stored: string | null = null;
+  try {
+    stored = window.localStorage.getItem("animationsEnabled");
+  } catch {
+    stored = null;
+  }
+  if (stored === "true") return true;
+  if (stored === "false") return false;
+  return true;
+}
+
 export default function App() {
   const [page, setPage] = useState<PageId>("intro");
   const [scenarioState, setScenarioState] = useState<ScenarioState>({
@@ -176,26 +206,14 @@ export default function App() {
   const verifyInFlightRef = useRef(false);
 
   /**
-   * 动效开关初始值：
-   *   - localStorage 有值则遵循（隐私模式读写会抛 SecurityError，try/catch 兜底）
-   *   - 否则优先尊重系统 (prefers-reduced-motion: reduce)，默认开启。
+   * 动效开关初始值：系统偏好无条件优先，详见 resolveAnimationsEnabled。
    */
-  const [animationsEnabled, setAnimationsEnabled] = useState<boolean>(() => {
-    let stored: string | null = null;
-    try {
-      stored = window.localStorage.getItem("animationsEnabled");
-    } catch {
-      stored = null;
-    }
-    if (stored === "true") return true;
-    if (stored === "false") return false;
-    // 无持久化记录时，跟随系统设置
-    try {
-      return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    } catch {
-      return true;
-    }
-  });
+  const [animationsEnabled, setAnimationsEnabled] =
+    useState<boolean>(resolveAnimationsEnabled);
+  /** 系统是否要求减少动态效果；为 true 时强制关闭动效且禁用手动开关。 */
+  const [systemReducesMotion, setSystemReducesMotion] = useState<boolean>(
+    systemPrefersReducedMotion
+  );
 
   type MediaQueryListener = (mql: MediaQueryList) => void;
 
@@ -209,7 +227,9 @@ export default function App() {
       handler = (e) => {
         const matches =
           "matches" in e ? (e as MediaQueryListEvent).matches : (e as MediaQueryList).matches;
-        if (matches) setAnimationsEnabled(false);
+        // 复用同一套解析逻辑，避免系统偏好变化时退化为只看 localStorage。
+        setSystemReducesMotion(matches);
+        setAnimationsEnabled(resolveAnimationsEnabled());
       };
       const q = query;
       if (q && "addEventListener" in q && typeof q.addEventListener === "function") {
@@ -236,6 +256,8 @@ export default function App() {
   }, []);
 
   function toggleAnimations() {
+    // 系统要求 reduce 时一律不允许手动开启，系统偏好胜出。
+    if (systemPrefersReducedMotion()) return;
     setAnimationsEnabled((prev) => {
       const next = !prev;
       try {
@@ -1114,6 +1136,7 @@ export default function App() {
                 playing={selectedPlaying}
                 animationsEnabled={animationsEnabled}
                 onAnimationsToggle={toggleAnimations}
+                animationsToggleDisabled={systemReducesMotion}
                 onJump={selectedHandleJump}
                 onNext={selectedHandleNext}
                 onPrev={selectedHandlePrev}
@@ -1139,6 +1162,7 @@ export default function App() {
                 playing={selectedPlaying}
                 animationsEnabled={animationsEnabled}
                 onAnimationsToggle={toggleAnimations}
+                animationsToggleDisabled={systemReducesMotion}
                 onJump={selectedHandleJump}
                 onNext={selectedHandleNext}
                 onPrev={selectedHandlePrev}
@@ -1392,6 +1416,7 @@ export default function App() {
             playing={playing}
             animationsEnabled={animationsEnabled}
             onAnimationsToggle={toggleAnimations}
+            animationsToggleDisabled={systemReducesMotion}
             onJump={handleJump}
             onNext={handleNext}
             onPrev={handlePrev}

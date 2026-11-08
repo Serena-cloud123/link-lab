@@ -4,6 +4,8 @@ interface PlaybackBarProps {
   playing: boolean;
   animationsEnabled: boolean;
   onAnimationsToggle: () => void;
+  /** 系统要求减少动态效果时禁用手动开关，避免用户尝试开启却无效。 */
+  animationsToggleDisabled?: boolean;
   /** 跳转下标（直接 set）。 */
   onJump: (index: number) => void;
   /** 推进到下一个；末尾自然停。 */
@@ -21,6 +23,7 @@ export function PlaybackBar({
   playing,
   animationsEnabled,
   onAnimationsToggle,
+  animationsToggleDisabled,
   onJump,
   onNext,
   onPrev,
@@ -84,9 +87,22 @@ export function PlaybackBar({
         type="button"
         className={`playback-btn anim-toggle ${animationsEnabled ? "on" : "off"}`}
         onClick={onAnimationsToggle}
-        aria-label={animationsEnabled ? "关闭动画" : "开启动画"}
+        disabled={animationsToggleDisabled}
+        aria-label={
+          animationsToggleDisabled
+            ? "系统已开启减少动画效果，动效强制关闭"
+            : animationsEnabled
+              ? "关闭动画"
+              : "开启动画"
+        }
         aria-pressed={animationsEnabled}
-        title={animationsEnabled ? "关闭动画（可让 prefers-reduced-motion 用户先关）" : "开启动画"}
+        title={
+          animationsToggleDisabled
+            ? "系统已开启减少动画效果，动效强制关闭"
+            : animationsEnabled
+              ? "关闭动画（可让 prefers-reduced-motion 用户先关）"
+              : "开启动画"
+        }
       >
         {animationsEnabled ? "动效开" : "动效关"}
       </button>
