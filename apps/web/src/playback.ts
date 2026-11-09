@@ -40,7 +40,7 @@ export interface PlaybackView {
 }
 
 const OUTCOME_TEXT: Record<StepOutcome, string> = {
-  passed: "已通过",
+  passed: "请求进入下一步（模拟）",
   rejected: "已拒绝",
   skipped: "未执行",
   "data-arrived": "数据到达"
@@ -121,7 +121,7 @@ export function derivePlaybackView(
     unmetReasons,
     priorRejected,
     rejectedStopFraction,
-    graphAnchor: `当前事件：路径 ${event.pathId} · ${event.stepId}（${OUTCOME_TEXT[event.outcome]}）`
+    graphAnchor: `当前事件：路径 ${event.pathId} · ${event.stepId} · ${OUTCOME_TEXT[event.outcome]}`
   };
 }
 

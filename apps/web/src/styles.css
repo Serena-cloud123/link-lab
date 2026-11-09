@@ -86,6 +86,38 @@ h3 {
   min-width: 0;
 }
 
+.role-brief {
+  margin: 0 0 24px;
+  padding: 18px 22px;
+  border-left: 3px solid #7fc8b5;
+  border-radius: 8px;
+  background: #12212a;
+  color: #d8e2ea;
+  line-height: 1.7;
+}
+
+.condition-legend {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px dashed #2c3b49;
+  border-radius: 8px;
+  background: #101a24;
+  color: #b6c3cf;
+  font-size: 0.85rem;
+}
+
+.condition-legend p {
+  margin: 0 0 4px;
+}
+
+.condition-legend p:last-child {
+  margin-bottom: 0;
+}
+
+.condition-legend strong {
+  color: #9fd8c8;
+}
+
 .boundary {
   padding: 24px 28px;
   border: 1px solid #2c3b49;

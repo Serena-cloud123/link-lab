@@ -1223,6 +1223,16 @@ export default function App() {
     content = (
       <section aria-labelledby="intro-title">
         <h1 id="intro-title">{ready.title}</h1>
+        <div className="role-brief">
+          <p>一套校园报名系统的安全演练沙盘。你在一个虚构的系统上练习判断攻击路径。</p>
+          <p>
+            从「学生账号」到「报名明细」之间隔着七个环节。攻击者想拿走别人的报名信息有两条路：一是直奔后台的批量导出接口，短、直接；二是绕到没人管的运维诊断页，借它自带的通行证去数据服务取数，远、但更隐蔽。
+          </p>
+          <p>
+            你要扮演安全分析员。调两个现实条件——诊断页是否对普通账号开放、服务令牌有没有明细权限——看哪条路通、哪条断；再打开防御，看攻击是被拦住，还是只留下告警。每次运行都能存进学习记录，回头比对「你预判的」和「实际跑的」差在哪。
+          </p>
+          <p>全程虚构模拟数据，不接触任何真实系统，随时可重置。</p>
+        </div>
         <div className="boundary">
           <h2>模型边界</h2>
           <p>{ready.boundary}</p>
@@ -1268,6 +1278,15 @@ export default function App() {
       <section className="workbench-grid" aria-label="沙盘工作台">
         <aside className="panel config-panel" aria-label="运行配置">
           <h2>运行配置</h2>
+          <div className="condition-legend">
+            <p>
+              <strong>O</strong> 诊断页开放：开 / 关
+            </p>
+            <p>
+              <strong>T</strong> 令牌明细权限：有 / 无
+            </p>
+            <p className="hint">开 / 关、有 / 无只改变本次模拟的初始条件。</p>
+          </div>
           <div className="preset-group" role="group" aria-label="预设">
             {ready.presets.map((item) => (
               <button
@@ -1292,7 +1311,9 @@ export default function App() {
 
           <div className="condition-sliders">
             <div className="slider-row">
-              <label htmlFor="o-slider">{ready.initialConditions.O.label}</label>
+              <label htmlFor="o-slider">
+                {ready.initialConditions.O.label}（O）
+              </label>
               <input
                 id="o-slider"
                 type="range"
@@ -1313,7 +1334,9 @@ export default function App() {
               <span className="slider-value">{oValueText[preview.O]}</span>
             </div>
             <div className="slider-row">
-              <label htmlFor="t-slider">{ready.initialConditions.T.label}</label>
+              <label htmlFor="t-slider">
+                {ready.initialConditions.T.label}（T）
+              </label>
               <input
                 id="t-slider"
                 type="range"
@@ -1452,43 +1475,46 @@ export default function App() {
                 result={runState.result}
                 input={runState.input}
               />
-              <div className="save-run">
-                {saveState.status === "saved" &&
-                saveState.runVersion === runVersionRef.current ? (
-                  <div className="notice" role="status">
-                    <p>
-                      已保存运行 #{saveState.record.id}（保存时间{" "}
-                      {saveState.record.savedAt}）
-                    </p>
-                    <p>
-                      一句话解释（
-                      {explanationSourceLabel(saveState.record.explanationSource)}
-                      ）：{saveState.record.explanation}
-                    </p>
-                  </div>
-                ) : null}
-                {saveState.status === "error" &&
-                saveState.runVersion === runVersionRef.current ? (
-                  <p className="notice error" role="alert">
-                    保存失败：{saveState.message}
-                  </p>
-                ) : null}
-                <button
-                  type="button"
-                  className="run-button"
-                  disabled={saveState.status === "saving"}
-                  onClick={() => void handleSaveRun()}
-                >
-                  {saveState.status === "saving"
-                    ? "正在保存…"
-                    : "保存此配置的推演"}
-                </button>
-              </div>
               <div className="learning-quiz" aria-label="三题自测">
                 <h3>三题自测</h3>
                 <p className="hint">
                   每题都用它自己的固定配置独立推演，与上方工作台当前配置无关，也不评价眼前这次运行。
                 </p>
+                <p className="hint quiz-order">
+                  先保存本次推演，再提交答案。保存会把三题预测与这次运行放在同一条学习记录中。
+                </p>
+                <div className="save-run">
+                  {saveState.status === "saved" &&
+                  saveState.runVersion === runVersionRef.current ? (
+                    <div className="notice" role="status">
+                      <p>
+                        已保存运行 #{saveState.record.id}（保存时间{" "}
+                        {saveState.record.savedAt}）
+                      </p>
+                      <p>
+                        一句话解释（
+                        {explanationSourceLabel(saveState.record.explanationSource)}
+                        ）：{saveState.record.explanation}
+                      </p>
+                    </div>
+                  ) : null}
+                  {saveState.status === "error" &&
+                  saveState.runVersion === runVersionRef.current ? (
+                    <p className="notice error" role="alert">
+                      保存失败：{saveState.message}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="run-button"
+                    disabled={saveState.status === "saving"}
+                    onClick={() => void handleSaveRun()}
+                  >
+                    {saveState.status === "saving"
+                      ? "正在保存…"
+                      : "保存此配置的推演"}
+                  </button>
+                </div>
                 {questionsState.status === "loading" ? (
                   <p className="notice">正在加载题目…</p>
                 ) : null}
@@ -1561,7 +1587,7 @@ export default function App() {
                       {saveState.status !== "saved" ||
                       saveState.runVersion !== runVersionRef.current ? (
                         <p className="hint">
-                          先保存本次运行，才能把三题预测与这条运行关联。
+                          尚未保存本次推演，三题答案暂时还不能提交。
                         </p>
                       ) : null}
                     </div>
@@ -1614,7 +1640,7 @@ export default function App() {
   return (
     <main className="shell">
       <header className="topbar">
-        <p className="stage">Day 12 · 显式保存与规则解释</p>
+        <p className="stage">攻防因果教学沙盘 · 虚构场景，仅作教学演示</p>
         <nav className="topnav" aria-label="页面">
           {pages.map((item) => (
             <button

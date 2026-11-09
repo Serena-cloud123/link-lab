@@ -353,8 +353,56 @@ describe("Day 13 — 三题与学习记录（前端）", () => {
     });
     expect(submit).toBeDisabled();
     expect(
-      screen.getByText("先保存本次运行，才能把三题预测与这条运行关联。")
+      screen.getByText("尚未保存本次推演，三题答案暂时还不能提交。")
     ).toBeInTheDocument();
+  });
+
+  it("先选三题再保存：已选答案保留，提交按钮转为可用并能正确提交", async () => {
+    await renderWorkbenchWithRun();
+    await waitQuestions();
+
+    // 先作答，再保存——锁住「保存不清空已选答案」
+    selectOption(/能到达——路径 B 不受 D1 影响/);
+    selectOption(/被阻断——D3 会把两条路径都拦截/);
+    selectOption(/不必——B2 因 O 关闭被拒/);
+
+    const submitBefore = screen.getByRole("button", {
+      name: "提交三题预测并保存学习记录"
+    });
+    expect(submitBefore).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "保存此配置的推演" })
+    );
+    await screen.findByText(/已保存运行 #record-fixed-id-001/);
+
+    // 三个选项仍为选中态
+    expect(
+      screen.getByRole("button", { name: /能到达——路径 B 不受 D1 影响/ })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /被阻断——D3 会把两条路径都拦截/ })
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("button", { name: /不必——B2 因 O 关闭被拒/ })
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // 提交按钮转为可用
+    const submitAfter = screen.getByRole("button", {
+      name: "提交三题预测并保存学习记录"
+    });
+    expect(submitAfter).not.toBeDisabled();
+
+    fireEvent.click(submitAfter);
+    await waitFor(() => expect(saveLearningMock).toHaveBeenCalledTimes(1));
+    expect(saveLearningMock).toHaveBeenCalledWith({
+      runId: "record-fixed-id-001",
+      predictions: { Q1: "0", Q2: "1", Q3: "0" },
+      resumedEventIndex: 0
+    });
+    await waitFor(() =>
+      expect(screen.getAllByText(/回答正确/)).toHaveLength(2)
+    );
   });
 
   it("保存后提交三题，只调用一次 saveLearning，并把恢复下标一并提交", async () => {

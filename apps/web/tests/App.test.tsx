@@ -449,6 +449,22 @@ describe("App 工作台交互", () => {
     expect(prev).not.toBeDisabled();
   });
 
+  it("passed 事件的展示文字为「请求进入下一步（模拟）」，界面不再出现「已通过」", async () => {
+    postEvaluationMock.mockImplementation((input: RunInput) =>
+      Promise.resolve(makeResult(input))
+    );
+    await renderWorkbench();
+    fireEvent.click(getDefenseButton("D1"));
+    await screen.findByText(/路径 B 仍到达模拟数据/);
+
+    // 事件列表与当前事件面板均显示新文案
+    expect(
+      screen.getAllByText(/请求进入下一步（模拟）/).length
+    ).toBeGreaterThan(0);
+    // 旧文案不再出现在任何界面文本中
+    expect(screen.queryByText(/已通过/)).not.toBeInTheDocument();
+  });
+
   it("D1 开启：跳到下标 2，A3 显示已拒绝 + D1 未满足理由（来自引擎原样 reason）", async () => {
     postEvaluationMock.mockImplementation((input: RunInput) =>
       Promise.resolve(makeResult(input))
@@ -774,9 +790,9 @@ describe("Day 12 显式保存", () => {
     getRunLearningMock.mockResolvedValue(null);
   });
 
-  it("顶部阶段标题更新为 Day 12，学习记录页显示空状态而非旧占位符", async () => {
+  it("顶部阶段标题为产品化副标题，学习记录页显示空状态而非旧占位符", async () => {
     render(<App />);
-    await screen.findByText(/Day 12 · 显式保存与规则解释/);
+    await screen.findByText("攻防因果教学沙盘 · 虚构场景，仅作教学演示");
     fireEvent.click(screen.getByRole("button", { name: "学习记录" }));
     await screen.findByText(/暂无保存的运行/);
     expect(
