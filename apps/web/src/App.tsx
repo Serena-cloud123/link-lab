@@ -1358,6 +1358,9 @@ export default function App() {
             </div>
           </div>
 
+          <p className="defense-hint">
+            三项防御默认全部关闭。点一下开启，再点一下关闭；每次改动都会用当前 O/T 重跑一次。
+          </p>
           <div className="defense-group" role="group" aria-label="防御措施">
             {DEFENSE_ORDER.map((id) => {
               const def = ready.defenses[id];
@@ -1377,7 +1380,10 @@ export default function App() {
                   <span className="defense-id">{id}</span>
                   <span className="defense-label">{def.label}</span>
                   <span className="defense-type">
-                    {isD3 ? "记录告警" : "阻断"}
+                    {isD3 ? "仅记录告警" : "阻断"}
+                  </span>
+                  <span className="defense-state">
+                    {active ? "已开启" : "未开启"}
                   </span>
                 </button>
               );
@@ -1386,11 +1392,11 @@ export default function App() {
 
           {hasDefenses ? (
             baselineRunning ? (
-              <p className="baseline-prompt">正在运行当前条件的无防御基线…</p>
+              <p className="baseline-prompt">正在运行不加防御的对照…</p>
             ) : baselineMatches ? null : (
               <div className="baseline-prompt">
                 <p>
-                  当前 O/T 尚无无防御基线，无法对比。补跑一次不会改变防御开关，也不会覆盖当前结果。
+                  先运行一次同样 O/T、但不加防御的结果，才能看出防御起了什么作用。
                 </p>
                 <button
                   type="button"
@@ -1398,11 +1404,11 @@ export default function App() {
                   disabled={running}
                   onClick={() => void runBaseline()}
                 >
-                  运行当前条件的无防御基线
+                  运行不加防御的对照
                 </button>
                 {baselineState.status === "error" ? (
                   <p className="baseline-error" role="alert">
-                    基线运行失败：{baselineState.message}
+                    对照运行失败：{baselineState.message}
                   </p>
                 ) : null}
               </div>

@@ -259,8 +259,12 @@ h3 {
 .defense-toggle {
   display: grid;
   grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  grid-template-areas:
+    "id label type"
+    "state state state";
   align-items: center;
-  gap: 10px;
+  gap: 4px 10px;
   padding: 10px 12px;
   border: 1px solid #2c3b49;
   border-radius: 8px;
@@ -292,6 +296,7 @@ h3 {
 }
 
 .defense-id {
+  grid-area: id;
   font-weight: 700;
   color: #7fc8b5;
   min-width: 28px;
@@ -302,10 +307,12 @@ h3 {
 }
 
 .defense-label {
+  grid-area: label;
   font-size: 0.85rem;
 }
 
 .defense-type {
+  grid-area: type;
   font-size: 0.75rem;
   padding: 2px 8px;
   border-radius: 10px;
@@ -317,6 +324,18 @@ h3 {
 .defense-toggle.d3 .defense-type {
   background: #2a2210;
   color: #e0c184;
+}
+
+.defense-state {
+  grid-area: state;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.defense-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  opacity: 0.8;
 }
 
 .run-button {

@@ -350,10 +350,10 @@ describe("App 工作台交互", () => {
     );
     await renderWorkbench();
     fireEvent.click(getDefenseButton("D1"));
-    await screen.findByText(/当前 O\/T 尚无无防御基线/);
+    await screen.findByText(/先运行一次同样 O\/T、但不加防御的结果/);
     const callsBefore = postEvaluationMock.mock.calls.length;
     fireEvent.click(
-      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+      screen.getByRole("button", { name: "运行不加防御的对照" })
     );
     await screen.findByText(COMPARISON_TITLE);
     expect(postEvaluationMock.mock.calls.length).toBe(callsBefore + 1);
@@ -375,9 +375,9 @@ describe("App 工作台交互", () => {
     });
     await renderWorkbench();
     fireEvent.click(getDefenseButton("D1"));
-    await screen.findByText(/当前 O\/T 尚无无防御基线/);
+    await screen.findByText(/先运行一次同样 O\/T、但不加防御的结果/);
     fireEvent.click(
-      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+      screen.getByRole("button", { name: "运行不加防御的对照" })
     );
     const oSlider = getOSlider();
     fireEvent.input(oSlider, { target: { value: "1" } });
@@ -959,7 +959,7 @@ describe("Day 12 显式保存", () => {
 
     // 补跑无防御基线
     fireEvent.click(
-      screen.getByRole("button", { name: "运行当前条件的无防御基线" })
+      screen.getByRole("button", { name: "运行不加防御的对照" })
     );
     await waitFor(() => expect(postEvaluationMock).toHaveBeenCalledTimes(4));
 
