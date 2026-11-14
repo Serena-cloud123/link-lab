@@ -4,10 +4,19 @@
 
 ## 当前阶段
 
-Day 19：功能已冻结，进入交付。P0/P1 全部完成：三页七步闭环、O/T 两档吸附滑块松手才提交、事件下标驱动的规则状态流线（未执行消失、被拒撞护栏回弹、到达穿透、D3 侧向告警）、同条件基线与干预对比、三题含迁移题、运行保存、只读回放与零副作用版本核对。默认一句话解释由确定性规则模板生成并随运行一次落库，回放只读库、不重新生成；可选模型 API 未接入。干净目录按本 README 实测复现的数据见下方「干净目录复现」，分段耗时、落库证据与局限见 docs/Day18_最终版复现.md 与 evidence/repro/day18/；Day 19 补做了重启后逐字段核对（运行记录与学习记录原始响应逐字节一致，显式核对返回 match，核对后记录不变），过程见 docs/Day19_正式录制.md。开发全程的 AI 协作记录已封存为四条 Prompt 链，见 evidence/README.md。
+功能冻结，材料提交。P0/P1 全部完成：三页七步闭环、O/T 两档吸附滑块松手才提交、事件下标驱动的规则状态流线（未执行消失、被拒撞护栏回弹、到达穿透、D3 侧向告警）、同条件基线与干预对比、三题含迁移题、运行保存、只读回放与零副作用版本核对。
 
-「一句话解释（规则模板）」由确定性模板生成，不是大模型输出；界面按响应的 `explanationSource` 字段标注来源。
+默认一句话解释由确定性规则模板生成并随运行一次落库，回放只读库、不重新生成；可选模型 API 未接入。「一句话解释（规则模板）」由确定性模板生成，不是大模型输出，界面按响应的 explanationSource 字段标注来源。
 
+交付材料：
+
+| 材料 | 位置 |
+| --- | --- |
+| 源码与演进记录 | 本仓库；四条 Prompt 链索引见 evidence/README.md |
+| 技术文档（14 页） | deliverables/技术文档.pdf，源文件 docs/技术文档.md |
+| 作品介绍 | deliverables/作品介绍.pdf，源文件 docs/作品介绍文档.md |
+| 演示视频 | 5 分 39 秒，见提交表单中的视频链接 |
+| 复现实测数据 | docs/Day18_最终版复现.md、docs/Day19_正式录制.md |
 ## 学习目标
 
 1. 判断一条攻击路径继续推进需要哪些条件。
@@ -42,6 +51,39 @@ Day 19：功能已冻结，进入交付。P0/P1 全部完成：三页七步闭�
 3. docs/工作台草图.md
 4. docs/访谈笔记.md
 
+## 环境与依赖清单
+
+| 项 | 版本 |
+| --- | --- |
+| 操作系统 | Windows 11（开发与复现均在此环境实测） |
+| Node.js | v24.21.0（package.json 要求 >=24.0.0） |
+| npm | 11.19.0 |
+| Git | 2.53.0.windows.2 |
+
+依赖按 npm workspaces 分为四个包，业务依赖只按 contracts → engine → API → web 单向传递。完整锁定版本见 package-lock.json，复现时用 npm ci 安装，不用 npm install。
+
+| 包 | 运行时依赖 | 开发依赖 |
+| --- | --- | --- |
+| packages/contracts | 无 | 无 |
+| packages/engine | @link-lab/contracts | vitest |
+| apps/api | @link-lab/contracts、@link-lab/engine、fastify | @types/node、vitest |
+| apps/web | @link-lab/contracts、@xyflow/react、react、react-dom | @testing-library/*、@types/react*、@vitejs/plugin-react、jsdom、vite、vitest |
+| 根 | 无 | typescript |
+
+apps/web 不声明 @link-lab/engine 依赖，源码中也没有对它的导入，因此前端在工程上无法调用规则引擎，「前端不重算成败」由依赖结构保证，不是纪律要求。
+
+## 环境变量模板
+
+后端不需要任何密钥即可完整运行。环境变量模板为 apps/api/.env.example：
+
+    Copy-Item apps\api\.env.example apps\api\.env
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| PORT | 3001 | 后端监听端口 |
+| DATABASE_PATH | apps/api/data/link-lab.db | SQLite 文件位置；相对路径以仓库根为基准，目录自动创建 |
+
+.env 不进入版本库。不创建 .env 也能运行，此时使用上表默认值。
 ## 运行方法
 
 环境：Node.js v24.21.0，npm 11.19.0，Git 2.53.0.windows.2。使用 Node 内置 `node:sqlite`，无 ORM。数据库默认落在 `apps/api/data/link-lab.db`，目录自动创建，`src` 启动与 `dist` 启动指向同一文件；可用 `DATABASE_PATH` 覆盖（相对路径以仓库根为基准）。
