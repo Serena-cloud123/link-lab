@@ -16,3 +16,6 @@ apps/api/data/
 .env
 .env.*
 !.env.example
+
+# VS Code Markdown PDF 导出时的临时目录
+.screenshots/
